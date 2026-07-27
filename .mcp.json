@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ai-scientist-resource": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/start-mcp",
+      "args": [],
+      "env": {
+        "PORTAL_BASE_URL": "${PORTAL_BASE_URL}",
+        "PORTAL_ACCESS_TOKEN": "${PORTAL_ACCESS_TOKEN}",
+        "AI_SCIENTIST_STABLE_WORKSPACE_ROOT": "${AI_SCIENTIST_STABLE_WORKSPACE_ROOT}",
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

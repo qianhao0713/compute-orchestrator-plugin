@@ -1,0 +1,9 @@
+{
+  "name": "ai-scientist",
+  "version": "0.2.0",
+  "description": "Evaluate scientific workloads, prepare persistent inputs, provision CPU or V100 resources, and resume work after runtime migration.",
+  "author": {
+    "name": "AI Scientist Team"
+  },
+  "license": "Proprietary"
+}
