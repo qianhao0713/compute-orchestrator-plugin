@@ -44,7 +44,6 @@ async def get_resource_status() -> dict[str, Any]:
 async def ensure_resource(
     request_id: str,
     project_id: int,
-    session_id: str,
     client_message_id: str,
     pending_message: str,
     resource_type: Literal["CPU", "GPU"],
@@ -58,8 +57,13 @@ async def ensure_resource(
     model: str | None = None,
     working_directory: str | None = None,
     attachment_refs: list[Any] | None = None,
+    session_id: str = "",
 ) -> dict[str, Any]:
     """Submit an idempotent Portal resource request with resumable task context.
+
+    Do not supply session_id yourself. The plugin's Claude Code PreToolUse hook
+    injects the current session's real ID immediately before this tool executes.
+    A missing hook leaves it empty and request validation fails closed.
 
     For physical V100 GPUs, pass gpu_type='Z1120'. On a network timeout, call
     again with exactly the same IDs and pending request content.

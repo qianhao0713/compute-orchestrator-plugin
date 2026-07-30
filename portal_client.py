@@ -39,7 +39,7 @@ class PortalClient:
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self._settings.portal_access_token}",
+            "Authorization": f"{self._settings.portal_access_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }

@@ -1,0 +1,17 @@
+{
+  "description": "Inject trusted Claude Code runtime context into Portal requests.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__(plugin_ai-scientist_ai-scientist-resource|ai-scientist-resource)__ensure_resource",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_session_id.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

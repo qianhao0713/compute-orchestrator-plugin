@@ -93,7 +93,7 @@ Inputs:
 - `requestId`
 - `reason`
 - `projectId`
-- `sessionId`
+- `sessionId` (injected automatically from the current Claude Code session)
 - `clientMessageId`
 - `pendingRequest.message`
 - `pendingRequest.parts`
@@ -139,6 +139,8 @@ It should report:
    user; `targetResource` is the requested destination during provisioning.
 7. Every `ensure_resource` request must carry the resumable task context required
    by Portal: `projectId`, `sessionId`, `clientMessageId`, and `pendingRequest`.
+   Never generate or supply `sessionId`; the plugin hook injects the real current
+   Claude Code session ID and overwrites any caller-provided value.
 8. Never place Authorization headers, cookies, access tokens, secrets, temporary
    upload streams, or other ephemeral credentials inside `pendingRequest`.
 9. Preserve `traceId` in error reports.
@@ -437,7 +439,8 @@ When `provisioning == false`:
 1. confirm that all CPU-suitable pre-switch preparation has completed;
 2. verify that model, dataset, repository, configuration, and handoff artifacts are present on stable shared storage;
 3. generate a stable UUID-based `requestId`;
-4. obtain the Portal project ID and current Runtime `sessionId`;
+4. obtain the Portal project ID; the plugin hook injects the current Claude Code
+   `sessionId` automatically;
 5. preserve or generate a stable `clientMessageId` for this user request;
 6. construct a self-contained `pendingRequest` from the persisted handoff state;
 7. build the smallest sufficient supported resource specification;
@@ -455,7 +458,6 @@ CPU request:
 {
   "requestId": "<stable-uuid>",
   "projectId": 123,
-  "sessionId": "<runtime-session-id>",
   "clientMessageId": "<stable-client-message-id>",
   "reason": "<task and sizing rationale>",
   "resource": {
@@ -476,13 +478,15 @@ CPU request:
 }
 ```
 
+Do not include `sessionId` in the MCP tool arguments. The hook adds the current
+Claude Code session ID immediately before execution.
+
 GPU request:
 
 ```json
 {
   "requestId": "<stable-uuid>",
   "projectId": 123,
-  "sessionId": "<runtime-session-id>",
   "clientMessageId": "<stable-client-message-id>",
   "reason": "<task and sizing rationale>",
   "resource": {
@@ -503,7 +507,9 @@ GPU request:
 }
 ```
 
-Replace placeholder quantities with the assessed values.
+Do not include `sessionId` in the MCP tool arguments. The hook adds the current
+Claude Code session ID immediately before execution. Replace placeholder
+quantities with the assessed values.
 
 #### 7.3 Construct a resumable `pendingRequest`
 
@@ -753,7 +759,8 @@ Before calling `ensure_resource`, validate:
 - `requestId` is non-empty and at most 128 characters;
 - `reason` is at most 512 characters;
 - `projectId` is present and belongs to the current user;
-- `sessionId` is non-empty and at most 128 characters;
+- the hook-injected `sessionId` is non-empty and at most 128 characters; never
+  invent or manually provide it;
 - `clientMessageId` is non-empty and at most 128 characters;
 - `pendingRequest.message` is non-empty and at most 200000 characters;
 - `pendingRequest.parts` contains at most 100 items;
