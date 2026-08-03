@@ -92,7 +92,7 @@ Inputs:
 
 - `requestId`
 - `reason`
-- `projectId`
+- `projectId` (read by the MCP server from `PORTAL_PROJECT_ID`)
 - `sessionId` (injected automatically from the current Claude Code session)
 - `clientMessageId`
 - `pendingRequest.message`
@@ -139,6 +139,8 @@ It should report:
    user; `targetResource` is the requested destination during provisioning.
 7. Every `ensure_resource` request must carry the resumable task context required
    by Portal: `projectId`, `sessionId`, `clientMessageId`, and `pendingRequest`.
+   Never generate or supply `projectId`; the MCP server reads it from the
+   required `PORTAL_PROJECT_ID` environment variable.
    Never generate or supply `sessionId`; the plugin hook injects the real current
    Claude Code session ID and overwrites any caller-provided value.
 8. Never place Authorization headers, cookies, access tokens, secrets, temporary
@@ -439,8 +441,8 @@ When `provisioning == false`:
 1. confirm that all CPU-suitable pre-switch preparation has completed;
 2. verify that model, dataset, repository, configuration, and handoff artifacts are present on stable shared storage;
 3. generate a stable UUID-based `requestId`;
-4. obtain the Portal project ID; the plugin hook injects the current Claude Code
-   `sessionId` automatically;
+4. rely on the MCP server's configured `PORTAL_PROJECT_ID`; the plugin hook
+   injects the current Claude Code `sessionId` automatically;
 5. preserve or generate a stable `clientMessageId` for this user request;
 6. construct a self-contained `pendingRequest` from the persisted handoff state;
 7. build the smallest sufficient supported resource specification;
@@ -457,7 +459,6 @@ CPU request:
 ```json
 {
   "requestId": "<stable-uuid>",
-  "projectId": 123,
   "clientMessageId": "<stable-client-message-id>",
   "reason": "<task and sizing rationale>",
   "resource": {
@@ -478,15 +479,15 @@ CPU request:
 }
 ```
 
-Do not include `sessionId` in the MCP tool arguments. The hook adds the current
-Claude Code session ID immediately before execution.
+Do not include `projectId` or `sessionId` in the MCP tool arguments. The server
+reads `projectId` from `PORTAL_PROJECT_ID`, and the hook adds the current Claude
+Code session ID immediately before execution.
 
 GPU request:
 
 ```json
 {
   "requestId": "<stable-uuid>",
-  "projectId": 123,
   "clientMessageId": "<stable-client-message-id>",
   "reason": "<task and sizing rationale>",
   "resource": {
@@ -507,9 +508,10 @@ GPU request:
 }
 ```
 
-Do not include `sessionId` in the MCP tool arguments. The hook adds the current
-Claude Code session ID immediately before execution. Replace placeholder
-quantities with the assessed values.
+Do not include `projectId` or `sessionId` in the MCP tool arguments. The server
+reads `projectId` from `PORTAL_PROJECT_ID`, and the hook adds the current Claude
+Code session ID immediately before execution. Replace placeholder quantities
+with the assessed values.
 
 #### 7.3 Construct a resumable `pendingRequest`
 
@@ -538,7 +540,7 @@ The `pendingRequest.message` should contain:
 A suitable continuation prompt resembles:
 
 ```text
-Continue the paper reproduction task in project <projectId>.
+Continue the paper reproduction task in the configured Portal project.
 Work in <stable working directory>. The repository is at <path>.
 Completed: <brief persisted progress>.
 Next: inspect the persisted handoff record, verify the prepared model and data artifacts, install the remaining environment dependencies required by this machine, then run <command/configuration> using the newly available resources. Do not repeat completed downloads or preprocessing unless their outputs are missing or invalid. Validate the current machine resources and environment first, run a bounded smoke test, then execute the full task. Save logs and outputs under <stable paths>. If a
@@ -758,7 +760,8 @@ Before calling `ensure_resource`, validate:
 
 - `requestId` is non-empty and at most 128 characters;
 - `reason` is at most 512 characters;
-- `projectId` is present and belongs to the current user;
+- `PORTAL_PROJECT_ID` is configured as the current user's positive integer
+  project ID; never invent or manually provide `projectId` in tool arguments;
 - the hook-injected `sessionId` is non-empty and at most 128 characters; never
   invent or manually provide it;
 - `clientMessageId` is non-empty and at most 128 characters;
@@ -778,7 +781,8 @@ Before calling `ensure_resource`, validate:
 - GPU count is one of `1`, `2`, `4`, or `8`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
-- `projectId` is sent only in its documented top-level field;
+- the server sends its configured `projectId` only in the documented top-level
+  field;
 - the Portal GPU enum is `Z1120`; never send the display name `V100` as
   `gpuType`.
 

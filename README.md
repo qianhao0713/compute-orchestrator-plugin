@@ -39,16 +39,24 @@ Physical NVIDIA V100 hardware is represented by Portal as `gpuType: "Z1120"`.
 MCP tools intentionally do not poll indefinitely. The Skill controls polling so
 users can see status and the old runtime can stop safely during migration.
 
+`ensure_resource.session_id` is injected by the plugin's `PreToolUse` hook from
+Claude Code's authoritative hook context. Callers must omit it and must never
+generate a replacement value. If Claude Code does not provide a session ID, the
+hook blocks the tool call before it reaches Portal.
+
 ## Required environment variables
 
 ```bash
 export PORTAL_BASE_URL="https://portal.example.com"
 export PORTAL_ACCESS_TOKEN="..."
+export PORTAL_PROJECT_ID="123"
 export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist"
 ```
 
-Do not commit the Portal token. The stable workspace root must be mounted and
-accessible from both the old and new containers.
+`PORTAL_PROJECT_ID` must be a positive integer. MCP callers do not supply or
+generate `project_id`; both resource requests and handoff records use this
+server-side value. Do not commit the Portal token. The stable workspace root
+must be mounted and accessible from both the old and new containers.
 
 ## Install dependencies
 

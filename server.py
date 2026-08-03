@@ -43,7 +43,6 @@ async def get_resource_status() -> dict[str, Any]:
 @mcp.tool()
 async def ensure_resource(
     request_id: str,
-    project_id: int,
     client_message_id: str,
     pending_message: str,
     resource_type: Literal["CPU", "GPU"],
@@ -61,7 +60,8 @@ async def ensure_resource(
 ) -> dict[str, Any]:
     """Submit an idempotent Portal resource request with resumable task context.
 
-    Do not supply session_id yourself. The plugin's Claude Code PreToolUse hook
+    project_id is read from PORTAL_PROJECT_ID and is not a tool argument. Do not
+    supply session_id yourself. The plugin's Claude Code PreToolUse hook
     injects the current session's real ID immediately before this tool executes.
     A missing hook leaves it empty and request validation fails closed.
 
@@ -70,7 +70,7 @@ async def ensure_resource(
     """
     request = EnsureResourceRequest(
         requestId=request_id,
-        projectId=project_id,
+        projectId=settings().portal_project_id,
         sessionId=session_id,
         clientMessageId=client_message_id,
         reason=reason,
@@ -104,7 +104,6 @@ def inspect_current_resources() -> dict[str, Any]:
 
 @mcp.tool()
 def persist_handoff(
-    project_id: int,
     client_message_id: str,
     working_directory: str,
     objective: str,
@@ -119,9 +118,9 @@ def persist_handoff(
     expected_outputs: list[str] | None = None,
     notes: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Atomically persist a machine-switch handoff record on stable storage."""
+    """Persist a handoff using the project ID configured for this MCP server."""
     record = HandoffRecord(
-        projectId=project_id,
+        projectId=settings().portal_project_id,
         clientMessageId=client_message_id,
         objective=objective,
         repositoryPath=repository_path,
