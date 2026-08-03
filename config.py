@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,18 +30,10 @@ class Settings:
             raise RuntimeError("PORTAL_BASE_URL is required")
         if not token:
             raise RuntimeError("PORTAL_ACCESS_TOKEN is required")
-        if not project_id_raw:
-            raise RuntimeError("PORTAL_PROJECT_ID is required")
-        try:
-            project_id = int(project_id_raw)
-        except ValueError as exc:
-            raise RuntimeError(
-                "PORTAL_PROJECT_ID must be a positive integer"
-            ) from exc
-        if project_id <= 0:
-            raise RuntimeError("PORTAL_PROJECT_ID must be a positive integer")
         if not workspace:
             raise RuntimeError("AI_SCIENTIST_STABLE_WORKSPACE_ROOT is required")
+
+        project_id = _resolve_project_id(project_id_raw, workspace)
 
         return cls(
             portal_base_url=base_url,
@@ -60,3 +53,25 @@ class Settings:
                 os.environ.get("PORTAL_POOL_TIMEOUT_SECONDS", "5")
             ),
         )
+
+
+def _resolve_project_id(project_id_raw: str, workspace: str) -> int:
+    if project_id_raw:
+        try:
+            project_id = int(project_id_raw)
+        except ValueError as exc:
+            raise RuntimeError(
+                "PORTAL_PROJECT_ID must be a positive integer"
+            ) from exc
+        if project_id <= 0:
+            raise RuntimeError("PORTAL_PROJECT_ID must be a positive integer")
+        return project_id
+
+    directory_name = Path(workspace).expanduser().name
+    match = re.fullmatch(r"project([1-9][0-9]*)", directory_name)
+    if match is None:
+        raise RuntimeError(
+            "PORTAL_PROJECT_ID is not set and "
+            "AI_SCIENTIST_STABLE_WORKSPACE_ROOT must end with project{project_id}"
+        )
+    return int(match.group(1))

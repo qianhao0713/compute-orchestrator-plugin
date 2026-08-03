@@ -92,7 +92,7 @@ Inputs:
 
 - `requestId`
 - `reason`
-- `projectId` (read by the MCP server from `PORTAL_PROJECT_ID`)
+- `projectId` (resolved by the MCP server from its environment)
 - `sessionId` (injected automatically from the current Claude Code session)
 - `clientMessageId`
 - `pendingRequest.message`
@@ -139,8 +139,8 @@ It should report:
    user; `targetResource` is the requested destination during provisioning.
 7. Every `ensure_resource` request must carry the resumable task context required
    by Portal: `projectId`, `sessionId`, `clientMessageId`, and `pendingRequest`.
-   Never generate or supply `projectId`; the MCP server reads it from the
-   required `PORTAL_PROJECT_ID` environment variable.
+   Never generate or supply `projectId`; the MCP server reads it from
+   `PORTAL_PROJECT_ID` or extracts it from the stable workspace basename.
    Never generate or supply `sessionId`; the plugin hook injects the real current
    Claude Code session ID and overwrites any caller-provided value.
 8. Never place Authorization headers, cookies, access tokens, secrets, temporary
@@ -441,7 +441,7 @@ When `provisioning == false`:
 1. confirm that all CPU-suitable pre-switch preparation has completed;
 2. verify that model, dataset, repository, configuration, and handoff artifacts are present on stable shared storage;
 3. generate a stable UUID-based `requestId`;
-4. rely on the MCP server's configured `PORTAL_PROJECT_ID`; the plugin hook
+4. rely on the MCP server's environment-resolved project ID; the plugin hook
    injects the current Claude Code `sessionId` automatically;
 5. preserve or generate a stable `clientMessageId` for this user request;
 6. construct a self-contained `pendingRequest` from the persisted handoff state;
@@ -480,7 +480,7 @@ CPU request:
 ```
 
 Do not include `projectId` or `sessionId` in the MCP tool arguments. The server
-reads `projectId` from `PORTAL_PROJECT_ID`, and the hook adds the current Claude
+resolves `projectId` from its environment, and the hook adds the current Claude
 Code session ID immediately before execution.
 
 GPU request:
@@ -509,7 +509,7 @@ GPU request:
 ```
 
 Do not include `projectId` or `sessionId` in the MCP tool arguments. The server
-reads `projectId` from `PORTAL_PROJECT_ID`, and the hook adds the current Claude
+resolves `projectId` from its environment, and the hook adds the current Claude
 Code session ID immediately before execution. Replace placeholder quantities
 with the assessed values.
 
@@ -760,8 +760,9 @@ Before calling `ensure_resource`, validate:
 
 - `requestId` is non-empty and at most 128 characters;
 - `reason` is at most 512 characters;
-- `PORTAL_PROJECT_ID` is configured as the current user's positive integer
-  project ID; never invent or manually provide `projectId` in tool arguments;
+- `projectId` resolves to a positive integer from `PORTAL_PROJECT_ID`, or from a
+  stable workspace basename exactly matching `project{project_id}` when that
+  variable is empty; never invent or manually provide it in tool arguments;
 - the hook-injected `sessionId` is non-empty and at most 128 characters; never
   invent or manually provide it;
 - `clientMessageId` is non-empty and at most 128 characters;

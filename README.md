@@ -49,14 +49,18 @@ hook blocks the tool call before it reaches Portal.
 ```bash
 export PORTAL_BASE_URL="https://portal.example.com"
 export PORTAL_ACCESS_TOKEN="..."
-export PORTAL_PROJECT_ID="123"
-export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist"
+export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist/project{project_id}"
+# Optional explicit override:
+# export PORTAL_PROJECT_ID="123456"
 ```
 
-`PORTAL_PROJECT_ID` must be a positive integer. MCP callers do not supply or
-generate `project_id`; both resource requests and handoff records use this
-server-side value. Do not commit the Portal token. The stable workspace root
-must be mounted and accessible from both the old and new containers.
+When set, `PORTAL_PROJECT_ID` must be a positive integer. When it is absent or
+empty, the server extracts the ID from the final directory name of
+`AI_SCIENTIST_STABLE_WORKSPACE_ROOT`, which must exactly match
+`project{project_id}`. MCP callers do
+not supply or generate `project_id`; both resource requests and handoff records
+use this server-side value. Do not commit the Portal token. The stable workspace
+root must be mounted and accessible from both the old and new containers.
 
 ## Install dependencies
 
