@@ -19,7 +19,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        base_url = os.environ.get("PORTAL_BASE_URL", "").strip().rstrip("/")
+        base_url = _normalize_portal_base_url(
+            os.environ.get("PORTAL_BASE_URL", "")
+        )
         token = os.environ.get("PORTAL_ACCESS_TOKEN", "").strip()
         project_id_raw = os.environ.get("PORTAL_PROJECT_ID", "").strip()
         workspace = os.environ.get(
@@ -53,6 +55,17 @@ class Settings:
                 os.environ.get("PORTAL_POOL_TIMEOUT_SECONDS", "5")
             ),
         )
+
+
+def _normalize_portal_base_url(raw_value: str) -> str:
+    base_url = raw_value.strip().rstrip("/")
+    if not base_url:
+        return ""
+    if base_url.lower().startswith("https://"):
+        return f"https://{base_url[8:]}"
+    if base_url.lower().startswith("http://"):
+        return f"https://{base_url[7:]}"
+    return f"https://{base_url}"
 
 
 def _resolve_project_id(project_id_raw: str, workspace: str) -> int:
