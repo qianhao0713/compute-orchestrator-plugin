@@ -10,9 +10,9 @@ from typing import Any
 
 EXPECTED_TOOLS = {
     # Plugin-provided MCP servers are namespaced by plugin and server name.
-    "mcp__plugin_ai-scientist_ai-scientist-resource__ensure_resource",
+    "mcp__plugin_compute-orchestrator_compute-orchestrator-resource__ensure_resource",
     # Keep direct .mcp.json loading usable for local development.
-    "mcp__ai-scientist-resource__ensure_resource",
+    "mcp__compute-orchestrator-resource__ensure_resource",
 }
 MAX_SESSION_ID_LENGTH = 128
 

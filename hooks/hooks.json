@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__(plugin_ai-scientist_ai-scientist-resource|ai-scientist-resource)__ensure_resource",
+        "matcher": "mcp__(plugin_compute-orchestrator_compute-orchestrator-resource|compute-orchestrator-resource)__ensure_resource",
         "hooks": [
           {
             "type": "command",

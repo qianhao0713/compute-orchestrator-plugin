@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "ai-scientist-resource": {
+    "compute-orchestrator-resource": {
       "type": "stdio",
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/start-mcp",
       "args": [],

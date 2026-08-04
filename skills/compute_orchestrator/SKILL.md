@@ -1,5 +1,5 @@
 ---
-name: ai-scientist-compute-orchestrator
+name: compute-orchestrator
 description: >
   Plan, validate, provision, and execute compute-intensive scientific workloads
   such as paper reproduction, model training, evaluation, simulation, data
@@ -9,7 +9,7 @@ description: >
   OOM, CUDA OOM, process kills, or distributed-training failures.
 ---
 
-# AI Scientist Compute Orchestrator
+# Compute Orchestrator
 
 ## Purpose
 

@@ -1,4 +1,4 @@
-# AI Scientist Claude Code Plugin
+# Compute Orchestrator Claude Code Plugin
 
 This plugin evaluates scientific workloads, prepares reusable data dependencies
 in the current CPU container, requests CPU or V100 resources through Portal, and

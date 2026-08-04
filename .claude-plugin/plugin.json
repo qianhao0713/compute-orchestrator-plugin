@@ -1,9 +1,9 @@
 {
-  "name": "ai-scientist",
+  "name": "compute-orchestrator",
   "version": "0.2.0",
   "description": "Evaluate scientific workloads, prepare persistent inputs, provision CPU or V100 resources, and resume work after runtime migration.",
   "author": {
-    "name": "AI Scientist Team"
+    "name": "Compute Orchestrator Team"
   },
   "license": "Proprietary"
 }
