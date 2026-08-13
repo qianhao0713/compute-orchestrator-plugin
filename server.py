@@ -41,9 +41,18 @@ async def get_resource_status() -> dict[str, Any]:
 
 
 @mcp.tool()
+async def get_available_clusters() -> dict[str, Any]:
+    """Return Portal cluster types currently enabled for resource requests.
+
+    Call this after classifying the workload and before selecting a GPU cluster.
+    An enabled cluster may still queue because this list is not live capacity.
+    """
+    return await portal_client().get_available_clusters()
+
+
+@mcp.tool()
 async def ensure_resource(
     request_id: str,
-    client_message_id: str,
     pending_message: str,
     resource_type: Literal["CPU", "GPU"],
     cpu: int,
@@ -56,23 +65,18 @@ async def ensure_resource(
     model: str | None = None,
     working_directory: str | None = None,
     attachment_refs: list[Any] | None = None,
-    session_id: str = "",
 ) -> dict[str, Any]:
     """Submit an idempotent Portal resource request with resumable task context.
 
-    project_id is read from PORTAL_PROJECT_ID and is not a tool argument. Do not
-    supply session_id yourself. The plugin's Claude Code PreToolUse hook
-    injects the current session's real ID immediately before this tool executes.
-    A missing hook leaves it empty and request validation fails closed.
+    project_id is read from PORTAL_PROJECT_ID and is not a tool argument.
+    Portal creates the new Runtime session; do not send an old session ID.
 
-    For physical V100 GPUs, pass gpu_type='Z1120'. On a network timeout, call
-    again with exactly the same IDs and pending request content.
+    Use gpu_type='Z1120' for V100 or 'V5000' for V5000. On a network timeout,
+    call again with exactly the same request ID and pending request content.
     """
     request = EnsureResourceRequest(
         requestId=request_id,
         projectId=settings().portal_project_id,
-        sessionId=session_id,
-        clientMessageId=client_message_id,
         reason=reason,
         resource=ResourceSpec(
             resourceType=resource_type,

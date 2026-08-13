@@ -93,11 +93,17 @@ def _gpu_info() -> dict[str, Any]:
         if len(values) != 5:
             continue
         index, name, total_mib, free_mib, driver = values
+        normalized_name = name.upper()
+        portal_gpu_type = None
+        if "V5000" in normalized_name:
+            portal_gpu_type = "V5000"
+        elif "V100" in normalized_name:
+            portal_gpu_type = "Z1120"
         devices.append(
             {
                 "index": int(index),
                 "name": name,
-                "portalGpuType": "Z1120" if "V100" in name.upper() else None,
+                "portalGpuType": portal_gpu_type,
                 "totalMemoryGiB": round(float(total_mib) / 1024, 3),
                 "freeMemoryGiB": round(float(free_mib) / 1024, 3),
                 "driverVersion": driver,

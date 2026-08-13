@@ -1,7 +1,7 @@
 {
   "name": "compute-orchestrator",
   "version": "0.2.0",
-  "description": "Evaluate scientific workloads, prepare persistent inputs, provision CPU or V100 resources, and resume work after runtime migration.",
+  "description": "Evaluate scientific workloads, prepare persistent inputs, provision CPU, Z1120, or V5000 resources, and resume work after runtime migration.",
   "author": {
     "name": "Compute Orchestrator Team"
   },

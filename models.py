@@ -5,8 +5,20 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-GPU_BACKEND_TYPE = "Z1120"  # Portal enum for physical NVIDIA V100 GPUs.
+GPU_BACKEND_TYPES = {"Z1120", "V5000"}
 GPU_COUNTS = {1, 2, 4, 8}
+Z1120_SPECS = {
+    1: (8, 64),
+    2: (16, 128),
+    4: (32, 256),
+    8: (64, 512),
+}
+V5000_SPECS = {
+    1: (16, 112),
+    2: (32, 225),
+    4: (64, 450),
+    8: (128, 900),
+}
 FORBIDDEN_KEYS = {
     "authorization",
     "cookie",
@@ -29,7 +41,7 @@ class ResourceSpec(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     resource_type: Literal["CPU", "GPU"] = Field(alias="resourceType")
-    cpu: int = Field(ge=1, le=32)
+    cpu: int = Field(ge=1, le=128)
     memory_gib: int = Field(alias="memoryGiB", ge=1)
     gpu_type: str | None = Field(default=None, alias="gpuType", max_length=64)
     gpu_count: int = Field(default=0, alias="gpuCount", ge=0)
@@ -40,18 +52,28 @@ class ResourceSpec(BaseModel):
         if self.worker_num != 1:
             raise ValueError("workerNum currently must be 1")
         if self.resource_type == "CPU":
+            if self.cpu > 32:
+                raise ValueError("CPU resource supports at most 32 cores")
             if self.gpu_count != 0:
                 raise ValueError("CPU resource requires gpuCount=0")
             if self.gpu_type not in (None, ""):
                 raise ValueError("CPU resource requires gpuType=null")
             self.gpu_type = None
         else:
-            if self.gpu_type != GPU_BACKEND_TYPE:
-                raise ValueError(
-                    "Physical V100 GPU must use Portal gpuType='Z1120'"
-                )
+            if self.gpu_type not in GPU_BACKEND_TYPES:
+                raise ValueError("gpuType must be 'Z1120' or 'V5000'")
             if self.gpu_count not in GPU_COUNTS:
                 raise ValueError("GPU count must be one of 1, 2, 4, or 8")
+            fixed_specs = (
+                Z1120_SPECS if self.gpu_type == "Z1120" else V5000_SPECS
+            )
+            expected_cpu, expected_memory = fixed_specs[self.gpu_count]
+            if (self.cpu, self.memory_gib) != (expected_cpu, expected_memory):
+                raise ValueError(
+                    f"{self.gpu_type} requires the fixed "
+                    "(gpuCount, cpu, memoryGiB) specification "
+                    f"({self.gpu_count}, {expected_cpu}, {expected_memory})"
+                )
         return self
 
 
@@ -80,10 +102,6 @@ class EnsureResourceRequest(BaseModel):
     request_id: str = Field(alias="requestId", min_length=1, max_length=128)
     reason: str | None = Field(default=None, max_length=512)
     project_id: int = Field(alias="projectId", gt=0)
-    session_id: str = Field(alias="sessionId", min_length=1, max_length=128)
-    client_message_id: str = Field(
-        alias="clientMessageId", min_length=1, max_length=128
-    )
     pending_request: PendingRequest = Field(alias="pendingRequest")
     resource: ResourceSpec
 
@@ -91,7 +109,7 @@ class EnsureResourceRequest(BaseModel):
 class PortalEnvelope(BaseModel):
     code: str
     msg: str | None = None
-    data: dict[str, Any] | None = None
+    data: Any = None
     traceId: str | None = None
 
 

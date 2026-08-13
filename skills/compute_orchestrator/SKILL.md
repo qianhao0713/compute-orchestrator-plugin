@@ -1,12 +1,19 @@
 ---
 name: compute-orchestrator
 description: >
-  Plan, validate, provision, and execute compute-intensive scientific workloads
-  such as paper reproduction, model training, evaluation, simulation, data
-  preprocessing, and large-scale experiments. Use this skill before running any
-  task that may require substantial CPU, memory, GPU, GPU memory, multiple GPUs,
-  or multiple nodes, and use it again after resource-related failures such as
-  OOM, CUDA OOM, process kills, or distributed-training failures.
+  Mandatory resource planning and provisioning for every GPU-related task and
+  other compute-intensive workloads. Always use whenever a request mentions or
+  requires GPU, CUDA, NVIDIA, VRAM, GPU inference, GPU training, multi-GPU,
+  torchrun, NCCL, Z1120, or V5000, even for a small command or smoke test. Also
+  always use before executing model training or fine-tuning, including Qwen,
+  Qwen2, Qwen2.5, Qwen3, Qwen3-VL, Llama, DeepSeek, SFT, LoRA, pretraining,
+  continued pretraining, preference training, distributed training, Megatron,
+  or DeepSpeed tasks. Also use for paper reproduction, evaluation, simulation,
+  large preprocessing, substantial CPU/RAM/GPU/VRAM work, multi-GPU or
+  multi-node work, and after OOM, CUDA OOM, process kills, or distributed
+  failures. Load this skill and assess resources before running setup, launcher,
+  torchrun, deepspeed, or training shell commands; never start such training
+  directly in the initial CPU environment.
 ---
 
 # Compute Orchestrator
@@ -35,24 +42,44 @@ smallest supported configuration that is reasonably likely to complete the task.
 Portal can provide:
 
 - CPU-only environments with 1–32 CPU cores;
-- V100 GPU environments, represented by the Portal API as `gpuType: "Z1120"`;
+- Z1120 GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
+- V5000 training environments with 96 GiB VRAM per GPU, represented by
+  `gpuType: "V5000"`;
 - GPU counts of 1, 2, 4, or 8;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
 Never invent an unsupported GPU model or GPU count.
 
-Use these names consistently:
+Use the Portal GPU type names `Z1120` and `V5000` consistently. Do not use
+hardware aliases for Z1120.
 
-- human-facing hardware name: `V100`;
-- Portal API `gpuType` value: `Z1120`.
+Use only these exact Z1120 `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
+`(2,16,128)`, `(4,32,256)`, and `(8,64,512)`.
 
-Never send `V100` as the Portal `gpuType`.
+Use V5000 only for training supported Qwen, Llama, and DeepSeek models. Its
+environment, repository, conversion tools, examples, and launch scripts are
+fixed. Do not write training code or launchers from scratch. A derived launcher
+is allowed only by copying the closest official V5000 example and making minimal,
+reviewable model/hyperparameter changes after a VRAM estimate. Read
+[references/v5000-training.md](references/v5000-training.md) and search the local
+snapshot at `references/nhmegatron/zj_examples/V5000` before planning or
+continuing a V5000 task. Do not fetch the same examples from the web when the
+local snapshot contains the required template.
 
 `workerNum` currently defaults to `1` unless the runtime and Portal explicitly
 support a different value. Do not assume that requesting multiple GPUs implies
 multiple workers or multiple nodes.
 
 ## Required MCP tools
+
+### `get_available_clusters`
+
+Call `GET /scientist/deployment/clusters/available` after deciding CPU versus
+GPU and before every resource expansion. Treat returned identifiers
+case-insensitively. Never select Z1120 when `z1120` is absent or V5000 when
+`v5000` is absent. An included identifier means enabled, not guaranteed idle
+capacity; provisioning may still queue. An empty list means no internal GPU
+cluster may be selected, but it does not prohibit a CPU-only K8s expansion.
 
 This skill expects the plugin MCP server to expose these logical tools:
 
@@ -93,8 +120,6 @@ Inputs:
 - `requestId`
 - `reason`
 - `projectId` (resolved by the MCP server from its environment)
-- `sessionId` (injected automatically from the current Claude Code session)
-- `clientMessageId`
 - `pendingRequest.message`
 - `pendingRequest.parts`
 - `pendingRequest.model`
@@ -138,20 +163,19 @@ It should report:
 6. `currentResource` is the Portal-reported specification currently serving the
    user; `targetResource` is the requested destination during provisioning.
 7. Every `ensure_resource` request must carry the resumable task context required
-   by Portal: `projectId`, `sessionId`, `clientMessageId`, and `pendingRequest`.
+   by Portal: `projectId` and `pendingRequest`.
    Never generate or supply `projectId`; the MCP server reads it from
    `PORTAL_PROJECT_ID` or extracts it from the stable workspace basename.
-   Never generate or supply `sessionId`; the plugin hook injects the real current
-   Claude Code session ID and overwrites any caller-provided value.
+   Never send an old `sessionId` or `clientMessageId`; Portal generates new
+   Runtime session, message, and client identifiers after accepting expansion.
 8. Never place Authorization headers, cookies, access tokens, secrets, temporary
    upload streams, or other ephemeral credentials inside `pendingRequest`.
 9. Preserve `traceId` in error reports.
 10. On a network timeout after submitting a request, retry with the same
-    `requestId`, `clientMessageId`, and unchanged `pendingRequest`.
+    `requestId` and unchanged `pendingRequest`.
 11. Use a new `requestId` only for a genuinely new business request or a retry
     after a terminal failure.
-12. Keep `clientMessageId` stable for all retries of the same user request so the
-    Runtime can deduplicate automatic resubmission.
+12. Query available clusters before expansion and exclude unavailable GPU types.
 13. Do not submit repeated requests merely to accelerate a queue.
 14. Do not claim that an in-progress Portal operation was overwritten unless the
     backend exposes and successfully executes an explicit cancel/replace API.
@@ -216,6 +240,20 @@ dependencies. Verify that the execution path places meaningful work on a GPU.
 
 ### Phase 3: Generate or inspect the code
 
+For a supported Qwen, Llama, or DeepSeek training task targeting V5000, do not
+perform the generic environment/code generation steps below. Follow the fixed
+repository, model conversion tools, environment, example configuration, and
+launch script in [references/v5000-training.md](references/v5000-training.md).
+Search the plugin-local snapshot at
+`references/nhmegatron/zj_examples/V5000` first. It mirrors official examples
+for analysis but is not a complete executable repository. Access the official
+GitLab only when the snapshot lacks a needed file or the user requests an
+upstream refresh. Select an exact official V5000 example when available.
+Otherwise select the closest official example with the same model family and
+architecture, copy it as the sole template, and change only necessary model
+structure, parallelism, batch, sequence, precision, recomputation, and stable
+path parameters. Never implement a new training loop or launcher from scratch.
+
 Before the final resource estimate:
 
 1. inspect the existing repository and configuration;
@@ -251,12 +289,21 @@ Produce an internal resource plan containing:
 - `resourceType`: `CPU` or `GPU`;
 - CPU cores;
 - RAM in GiB;
-- GPU hardware: V100; Portal `gpuType`: `Z1120`;
+- GPU hardware/type: Z1120 or, for supported training, V5000;
 - GPU count: one of `1`, `2`, `4`, or `8`;
 - worker count;
 - confidence level;
 - assumptions;
 - headroom.
+
+For supported model training, also assess V5000 and choose the smallest fixed
+V5000 tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
+`(4,64,450)`, or `(8,128,900)`. Each GPU has 96 GiB VRAM. Do not submit a
+non-matching V5000 tuple.
+
+For Z1120 choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
+`(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`. Do not submit a
+non-matching Z1120 tuple.
 
 #### CPU estimate
 
@@ -316,9 +363,10 @@ Do not decide GPU count by dividing estimated VRAM by per-GPU VRAM unless the
 code supports a suitable distribution strategy. Data parallelism duplicates the
 model on each GPU and does not solve model-fit OOM.
 
-#### V100 compatibility
+#### Z1120 compatibility
 
-Before requesting V100 hardware through Portal using `gpuType: "Z1120"`, check:
+Before requesting Z1120, account for its 32 GiB VRAM per GPU and CUDA
+architecture `sm70`, then check:
 
 - required CUDA compute capability;
 - dtype support;
@@ -327,7 +375,7 @@ Before requesting V100 hardware through Portal using `gpuType: "Z1120"`, check:
 - custom CUDA extension architecture flags;
 - library versions that may require newer GPUs.
 
-Adapt code to supported V100 execution where possible without changing the
+Adapt code to supported Z1120 execution where possible without changing the
 scientific target. Otherwise explain that the workload is incompatible with the
 available GPU fleet.
 
@@ -423,6 +471,13 @@ environment/configuration needed for reproducibility.
 
 ### Phase 8: Request resources when insufficient
 
+Call `get_available_clusters` immediately before the status/ensure flow. For GPU
+work, filter candidate cluster types by its result. If the preferred type is
+absent, use another enabled compatible cluster only when it can preserve the
+task's meaning and execution contract; otherwise stop and report that no
+compatible cluster is enabled. Never silently move V5000 fixed-code training to
+Z1120 or run arbitrary code on V5000.
+
 #### 7.1 Query current Portal operation
 
 Call `get_resource_status`.
@@ -441,25 +496,22 @@ When `provisioning == false`:
 1. confirm that all CPU-suitable pre-switch preparation has completed;
 2. verify that model, dataset, repository, configuration, and handoff artifacts are present on stable shared storage;
 3. generate a stable UUID-based `requestId`;
-4. rely on the MCP server's environment-resolved project ID; the plugin hook
-   injects the current Claude Code `sessionId` automatically;
-5. preserve or generate a stable `clientMessageId` for this user request;
-6. construct a self-contained `pendingRequest` from the persisted handoff state;
-7. build the smallest sufficient supported resource specification;
-8. write a concise `reason` tied to the task and estimate;
-9. call `ensure_resource`;
-10. verify `code == "00000"`;
-11. compare returned `data.requestId` with the submitted value;
-12. inspect `operationType` and `resourceChanged`;
-13. if a switch/update is active, stop execution in the old runtime and poll;
-14. if Portal returns `NO_CHANGE`, continue the task once in the current runtime.
+4. rely on the MCP server's environment-resolved project ID;
+5. construct a self-contained `pendingRequest` from the persisted handoff state;
+6. build the smallest sufficient supported resource specification;
+7. write a concise `reason` tied to the task and estimate;
+8. call `ensure_resource`;
+9. verify `code == "00000"`;
+10. compare returned `data.requestId` with the submitted value;
+11. inspect `operationType` and `resourceChanged`;
+12. if a switch/update is active, stop execution in the old runtime and poll;
+13. if Portal returns `NO_CHANGE`, continue the task once in the current runtime.
 
 CPU request:
 
 ```json
 {
   "requestId": "<stable-uuid>",
-  "clientMessageId": "<stable-client-message-id>",
   "reason": "<task and sizing rationale>",
   "resource": {
     "resourceType": "CPU",
@@ -479,21 +531,19 @@ CPU request:
 }
 ```
 
-Do not include `projectId` or `sessionId` in the MCP tool arguments. The server
-resolves `projectId` from its environment, and the hook adds the current Claude
-Code session ID immediately before execution.
+Do not include `projectId`, `sessionId`, or `clientMessageId` in the MCP tool
+arguments. The server resolves `projectId`; Portal creates continuation IDs.
 
 GPU request:
 
 ```json
 {
   "requestId": "<stable-uuid>",
-  "clientMessageId": "<stable-client-message-id>",
   "reason": "<task and sizing rationale>",
   "resource": {
     "resourceType": "GPU",
-    "cpu": 1,
-    "memoryGiB": 1,
+    "cpu": 8,
+    "memoryGiB": 64,
     "gpuType": "Z1120",
     "gpuCount": 1,
     "workerNum": 1
@@ -508,10 +558,9 @@ GPU request:
 }
 ```
 
-Do not include `projectId` or `sessionId` in the MCP tool arguments. The server
-resolves `projectId` from its environment, and the hook adds the current Claude
-Code session ID immediately before execution. Replace placeholder quantities
-with the assessed values.
+Do not include `projectId`, `sessionId`, or `clientMessageId` in the MCP tool
+arguments. Replace placeholder quantities with assessed values. For V5000 use
+`gpuType: "V5000"` and one of its exact fixed tuples.
 
 #### 7.3 Construct a resumable `pendingRequest`
 
@@ -537,13 +586,22 @@ The `pendingRequest.message` should contain:
 - expected outputs and success criteria;
 - instructions to inspect persisted state before repeating work.
 
+For V5000, it must also state that `zj_examples/V5000` is relative to the root
+of the canonical `nhmegatron` repository from
+`https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/`, not relative to the
+current project directory. If the repository is absent, it must instruct the
+Runtime to consult the plugin-local snapshot first; remote GitLab inspection and
+cloning are optional fallbacks. It must identify the exact official source template and any
+derived script, enumerate every changed parameter, include the per-GPU VRAM
+estimate and headroom, and forbid from-scratch training code or launchers.
+
 A suitable continuation prompt resembles:
 
 ```text
 Continue the paper reproduction task in the configured Portal project.
 Work in <stable working directory>. The repository is at <path>.
 Completed: <brief persisted progress>.
-Next: inspect the persisted handoff record, verify the prepared model and data artifacts, install the remaining environment dependencies required by this machine, then run <command/configuration> using the newly available resources. Do not repeat completed downloads or preprocessing unless their outputs are missing or invalid. Validate the current machine resources and environment first, run a bounded smoke test, then execute the full task. Save logs and outputs under <stable paths>. If a
+Next: inspect the persisted handoff record and verify the prepared model and data artifacts. For V5000 training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/V5000 as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official V5000 example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
 resource-related failure occurs, collect measurements and re-run the resource
 assessment workflow.
 ```
@@ -564,14 +622,13 @@ or hidden secrets.
 When `provisioning == true`, compare the current `targetResource` with the newly
 required resource.
 
-Normalize missing `workerNum` to `1`. Normalize GPU naming so that the
-human-facing value `V100` maps to the Portal value `Z1120` before comparison.
+Normalize missing `workerNum` to `1`. Keep `Z1120` and `V5000` distinct.
 Compare at least:
 
 - resource type;
 - CPU;
 - memory GiB;
-- GPU type (`Z1120` for V100);
+- GPU type (`Z1120` or `V5000`);
 - GPU count;
 - worker count.
 
@@ -710,7 +767,7 @@ distinguish:
 - memory leak;
 - invalid tensor shape;
 - software bug;
-- unsupported V100 kernel;
+- unsupported Z1120 or V5000 kernel/environment;
 - wrong distributed launch;
 - data corruption;
 - storage exhaustion;
@@ -763,9 +820,7 @@ Before calling `ensure_resource`, validate:
 - `projectId` resolves to a positive integer from `PORTAL_PROJECT_ID`, or from a
   stable workspace basename exactly matching `project{project_id}` when that
   variable is empty; never invent or manually provide it in tool arguments;
-- the hook-injected `sessionId` is non-empty and at most 128 characters; never
-  invent or manually provide it;
-- `clientMessageId` is non-empty and at most 128 characters;
+- neither `sessionId` nor `clientMessageId` is present;
 - `pendingRequest.message` is non-empty and at most 200000 characters;
 - `pendingRequest.parts` contains at most 100 items;
 - `pendingRequest.model`, when present, is at most 256 characters;
@@ -778,14 +833,15 @@ Before calling `ensure_resource`, validate:
 - `cpu >= 1`;
 - `memoryGiB >= 1`;
 - CPU requests use `gpuCount == 0` and `gpuType == null`;
-- GPU requests use `gpuCount > 0` and `gpuType == "Z1120"`;
+- GPU requests use `gpuCount > 0` and `gpuType` equal to `Z1120` or `V5000`;
 - GPU count is one of `1`, `2`, `4`, or `8`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
 - the server sends its configured `projectId` only in the documented top-level
   field;
-- the Portal GPU enum is `Z1120`; never send the display name `V100` as
-  `gpuType`.
+- V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
+- Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
+- the available-cluster response includes the selected GPU type.
 
 ## Compact decision algorithm
 
@@ -798,6 +854,7 @@ understand task
      smoke test
      execute
   else:
+     GET available clusters and filter GPU candidates
      obtain user confirmation when required
      complete CPU-suitable model/data/repository preparation
      persist and verify handoff artifacts
@@ -805,8 +862,7 @@ understand task
      → if no active operation:
           verify persisted preparation
           build self-contained pendingRequest
-          POST smallest sufficient supported specification plus
-          project/session/message context
+          POST smallest sufficient supported specification plus project/message context
        else if active target equals required target:
           reuse and poll active operation
        else:
@@ -820,7 +876,7 @@ understand task
           Portal submits pendingRequest in the new Runtime
           new Runtime re-inspects resources
           verifies prepared artifacts
-          installs target-machine environment dependencies
+          uses fixed V5000 environment or installs required target dependencies
           smoke test
           executes core task exactly once
        else if NO_CHANGE:

@@ -1,7 +1,7 @@
 # Compute Orchestrator Claude Code Plugin
 
 This plugin evaluates scientific workloads, prepares reusable data dependencies
-in the current CPU container, requests CPU or V100 resources through Portal, and
+in the current CPU container, requests CPU, V100, or V5000 resources through Portal, and
 resumes the task in the new Claude Code runtime.
 
 ## Core lifecycle
@@ -13,15 +13,27 @@ resumes the task in the new Claude Code runtime.
    download models/data, clone repositories, verify artifacts, and persist a handoff.
 5. Call Portal `ensure` with `pendingRequest`.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
-7. The new runtime verifies persisted artifacts, installs machine-specific environment
-   dependencies, smoke-tests, and executes the core computation.
+7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
+   when required, smoke-tests, and executes the core computation. V5000 training uses
+   its fixed preinstalled environment and an existing training script under the
+   `nhmegatron` repository's `zj_examples/V5000` path. If no local checkout
+   exists, the agent first uses the plugin-bundled official example snapshot;
+   remote GitLab access is only a fallback. Missing exact variants may be minimally derived from the closest
+   same-family official example after a per-GPU VRAM budget; from-scratch V5000
+   training logic and launchers remain forbidden.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 Physical NVIDIA V100 hardware is represented by Portal as `gpuType: "Z1120"`.
+Z1120 requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
+`(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`.
+V5000 training hardware is represented as `gpuType: "V5000"`; each GPU has
+96 GiB VRAM and requests must use a supported fixed GPU/CPU/RAM tuple.
 
 ## Files
 
 - `skills/compute_orchestrator/SKILL.md`: orchestration policy.
+- `skills/compute_orchestrator/references/nhmegatron/zj_examples/V5000`: bundled
+  official V5000 example scripts for offline template selection.
 - `server.py`: MCP tool definitions.
 - `portal_client.py`: authenticated Portal API client.
 - `models.py`: request validation and secret rejection.
@@ -31,6 +43,7 @@ Physical NVIDIA V100 hardware is represented by Portal as `gpuType: "Z1120"`.
 ## MCP tools
 
 - `get_resource_status`
+- `get_available_clusters`
 - `ensure_resource`
 - `inspect_current_resources`
 - `persist_handoff`
@@ -39,16 +52,22 @@ Physical NVIDIA V100 hardware is represented by Portal as `gpuType: "Z1120"`.
 MCP tools intentionally do not poll indefinitely. The Skill controls polling so
 users can see status and the old runtime can stop safely during migration.
 
-`ensure_resource.session_id` is injected by the plugin's `PreToolUse` hook from
-Claude Code's authoritative hook context. Callers must omit it and must never
-generate a replacement value. If Claude Code does not provide a session ID, the
-hook blocks the tool call before it reaches Portal.
+Before choosing a GPU target, callers query the available-cluster tool and avoid
+clusters absent from its result. Portal creates a new Runtime session after a
+resource switch; the ensure request does not carry the old session ID.
+
+The plugin's `UserPromptSubmit` hook adds a resource-classification rule to every
+task. Explicit GPU and supported model-training prompts receive a stronger
+orchestration directive; otherwise Claude must first infer whether the task or
+code may require GPU compute. If so, it must load the Skill before running setup
+or workload commands. This also covers GPU needs discovered by Claude rather
+than stated by the user.
 
 ## Required environment variables
 
 ```bash
 export PORTAL_BASE_URL="https://portal.example.com"
-export PORTAL_ACCESS_TOKEN="..."
+export PORTAL_ACCESS_TOKEN="..." # raw token or "Bearer ..." are both accepted
 export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist/project{project_id}"
 # Optional explicit override:
 # export PORTAL_PROJECT_ID="123456"
@@ -85,7 +104,7 @@ Inside Claude Code, inspect MCP connectivity with `/mcp`.
 - Always check Portal business `code`, not only the HTTP status.
 - `provisioning` is authoritative for unfinished operations.
 - A successful ensure response may mean accepted or reused; it does not mean ready.
-- Network retries must preserve `requestId`, `clientMessageId`, and `pendingRequest`.
+- Network retries must preserve `requestId` and `pendingRequest`.
 - `pendingRequest` must not contain authorization data, cookies, tokens, secrets,
   passwords, or temporary upload streams.
 - `NO_CHANGE` means Portal will not resubmit the prompt; the current runtime continues once.

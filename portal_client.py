@@ -38,8 +38,12 @@ class PortalClient:
         )
 
     def _headers(self) -> dict[str, str]:
+        token = self._settings.portal_access_token.strip()
+        authorization = (
+            token if token.lower().startswith("bearer ") else f"Bearer {token}"
+        )
         return {
-            "Authorization": f"{self._settings.portal_access_token}",
+            "Authorization": authorization,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -52,11 +56,19 @@ class PortalClient:
             )
         return self._parse(response)
 
+    async def get_available_clusters(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(
+                f"{self._settings.portal_base_url}/scientist/deployment/clusters/available",
+                headers=self._headers(),
+            )
+        return self._parse_list(response, key="clusters")
+
     async def ensure_resource(
         self, request: EnsureResourceRequest
     ) -> dict[str, Any]:
-        # On a transport timeout, the caller must retry this exact object so
-        # requestId/clientMessageId/pendingRequest remain unchanged.
+        # On a transport timeout, retry this exact object so requestId and
+        # pendingRequest remain unchanged.
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
                 f"{self._settings.portal_base_url}/scientist/deployment/ensure",
@@ -65,8 +77,34 @@ class PortalClient:
             )
         return self._parse(response)
 
+    @classmethod
+    def _parse_list(cls, response: httpx.Response, *, key: str) -> dict[str, Any]:
+        data, trace_id = cls._parse_envelope(response)
+        if not isinstance(data, list):
+            raise PortalAPIError(
+                code="INVALID_DATA",
+                message="Portal response data must be a list",
+                trace_id=trace_id,
+                http_status=response.status_code,
+            )
+        return {key: data, "traceId": trace_id}
+
     @staticmethod
     def _parse(response: httpx.Response) -> dict[str, Any]:
+        data, trace_id = PortalClient._parse_envelope(response)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise PortalAPIError(
+                code="INVALID_DATA",
+                message="Portal response data must be an object",
+                trace_id=trace_id,
+                http_status=response.status_code,
+            )
+        return {**data, "traceId": trace_id}
+
+    @staticmethod
+    def _parse_envelope(response: httpx.Response) -> tuple[Any, str | None]:
         try:
             raw = response.json()
         except ValueError as exc:
@@ -95,6 +133,4 @@ class PortalClient:
                 http_status=response.status_code,
             )
 
-        data = envelope.data or {}
-        # Preserve traceId in successful tool results for diagnostics.
-        return {**data, "traceId": envelope.traceId}
+        return envelope.data, envelope.traceId

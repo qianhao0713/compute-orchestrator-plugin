@@ -1,13 +1,12 @@
 {
-  "description": "Inject trusted Claude Code runtime context into Portal requests.",
+  "description": "Require resource classification for every task and route GPU work through compute orchestration.",
   "hooks": {
-    "PreToolUse": [
+    "UserPromptSubmit": [
       {
-        "matcher": "mcp__(plugin_compute-orchestrator_compute-orchestrator-resource|compute-orchestrator-resource)__ensure_resource",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_session_id.py\"",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/route_training_prompt.py\"",
             "timeout": 5
           }
         ]
