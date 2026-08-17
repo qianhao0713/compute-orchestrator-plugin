@@ -120,6 +120,7 @@ Inputs:
 - `requestId`
 - `reason`
 - `projectId` (resolved by the MCP server from its environment)
+- `sessionId` (injected from the current Claude Code hook context)
 - `pendingRequest.message`
 - `pendingRequest.parts`
 - `pendingRequest.model`
@@ -163,16 +164,17 @@ It should report:
 6. `currentResource` is the Portal-reported specification currently serving the
    user; `targetResource` is the requested destination during provisioning.
 7. Every `ensure_resource` request must carry the resumable task context required
-   by Portal: `projectId` and `pendingRequest`.
+   by Portal: `projectId`, `sessionId`, and `pendingRequest`.
    Never generate or supply `projectId`; the MCP server reads it from
    `PORTAL_PROJECT_ID` or extracts it from the stable workspace basename.
-   Never send an old `sessionId` or `clientMessageId`; Portal generates new
-   Runtime session, message, and client identifiers after accepting expansion.
+   Never generate or manually supply `sessionId`; the plugin hook injects the
+   authoritative current Claude Code session ID and overwrites caller input.
+   Do not send `clientMessageId`.
 8. Never place Authorization headers, cookies, access tokens, secrets, temporary
    upload streams, or other ephemeral credentials inside `pendingRequest`.
 9. Preserve `traceId` in error reports.
 10. On a network timeout after submitting a request, retry with the same
-    `requestId` and unchanged `pendingRequest`.
+    `requestId`, hook-injected `sessionId`, and unchanged `pendingRequest`.
 11. Use a new `requestId` only for a genuinely new business request or a retry
     after a terminal failure.
 12. Query available clusters before expansion and exclude unavailable GPU types.
@@ -531,8 +533,8 @@ CPU request:
 }
 ```
 
-Do not include `projectId`, `sessionId`, or `clientMessageId` in the MCP tool
-arguments. The server resolves `projectId`; Portal creates continuation IDs.
+Do not include `projectId`, `sessionId`, or `clientMessageId` in caller-supplied
+MCP arguments. The server resolves `projectId`, and the hook injects `sessionId`.
 
 GPU request:
 
@@ -558,8 +560,8 @@ GPU request:
 }
 ```
 
-Do not include `projectId`, `sessionId`, or `clientMessageId` in the MCP tool
-arguments. Replace placeholder quantities with assessed values. For V5000 use
+Do not include `projectId`, `sessionId`, or `clientMessageId` in caller-supplied
+MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For V5000 use
 `gpuType: "V5000"` and one of its exact fixed tuples.
 
 #### 7.3 Construct a resumable `pendingRequest`
@@ -820,7 +822,8 @@ Before calling `ensure_resource`, validate:
 - `projectId` resolves to a positive integer from `PORTAL_PROJECT_ID`, or from a
   stable workspace basename exactly matching `project{project_id}` when that
   variable is empty; never invent or manually provide it in tool arguments;
-- neither `sessionId` nor `clientMessageId` is present;
+- the hook-injected `sessionId` is non-empty and at most 128 characters;
+- `clientMessageId` is absent;
 - `pendingRequest.message` is non-empty and at most 200000 characters;
 - `pendingRequest.parts` contains at most 100 items;
 - `pendingRequest.model`, when present, is at most 256 characters;

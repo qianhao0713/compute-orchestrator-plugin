@@ -65,11 +65,13 @@ async def ensure_resource(
     model: str | None = None,
     working_directory: str | None = None,
     attachment_refs: list[Any] | None = None,
+    session_id: str = "",
 ) -> dict[str, Any]:
     """Submit an idempotent Portal resource request with resumable task context.
 
-    project_id is read from PORTAL_PROJECT_ID and is not a tool argument.
-    Portal creates the new Runtime session; do not send an old session ID.
+    project_id is read from PORTAL_PROJECT_ID and is not a tool argument. Do not
+    supply session_id yourself. The plugin's PreToolUse hook injects the current
+    Claude Code session ID and missing trusted context fails validation closed.
 
     Use gpu_type='Z1120' for V100 or 'V5000' for V5000. On a network timeout,
     call again with exactly the same request ID and pending request content.
@@ -77,6 +79,7 @@ async def ensure_resource(
     request = EnsureResourceRequest(
         requestId=request_id,
         projectId=settings().portal_project_id,
+        sessionId=session_id,
         reason=reason,
         resource=ResourceSpec(
             resourceType=resource_type,

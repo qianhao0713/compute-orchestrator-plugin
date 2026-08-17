@@ -70,18 +70,31 @@ def test_cpu_still_rejects_more_than_32_cores():
         )
 
 
-def test_ensure_request_has_no_legacy_session_fields():
+def test_ensure_request_requires_session_id_but_no_client_message_id():
     request = EnsureResourceRequest(
         requestId="request-1",
         projectId=1,
+        sessionId="session-1",
         pendingRequest=PendingRequest(message="continue"),
         resource=ResourceSpec(
             resourceType="CPU", cpu=1, memoryGiB=2, gpuType=None, gpuCount=0
         ),
     )
     payload = request.model_dump(by_alias=True)
-    assert "sessionId" not in payload
+    assert payload["sessionId"] == "session-1"
     assert "clientMessageId" not in payload
+
+
+def test_ensure_request_rejects_missing_session_id():
+    with pytest.raises(ValidationError):
+        EnsureResourceRequest(
+            requestId="request-1",
+            projectId=1,
+            pendingRequest=PendingRequest(message="continue"),
+            resource=ResourceSpec(
+                resourceType="CPU", cpu=1, memoryGiB=2, gpuType=None, gpuCount=0
+            ),
+        )
 
 
 def test_cpu_rejects_gpu_count():

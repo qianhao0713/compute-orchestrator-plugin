@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__(plugin_compute-orchestrator_compute-orchestrator-resource|compute-orchestrator-resource)__ensure_resource",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_session_id.py\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

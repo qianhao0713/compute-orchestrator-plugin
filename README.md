@@ -54,7 +54,8 @@ users can see status and the old runtime can stop safely during migration.
 
 Before choosing a GPU target, callers query the available-cluster tool and avoid
 clusters absent from its result. Portal creates a new Runtime session after a
-resource switch; the ensure request does not carry the old session ID.
+resource switch. The ensure request carries the current Claude Code `sessionId`,
+injected from trusted `PreToolUse` hook context; callers must not generate it.
 
 The plugin's `UserPromptSubmit` hook adds a resource-classification rule to every
 task. Explicit GPU and supported model-training prompts receive a stronger
@@ -104,7 +105,7 @@ Inside Claude Code, inspect MCP connectivity with `/mcp`.
 - Always check Portal business `code`, not only the HTTP status.
 - `provisioning` is authoritative for unfinished operations.
 - A successful ensure response may mean accepted or reused; it does not mean ready.
-- Network retries must preserve `requestId` and `pendingRequest`.
+- Network retries must preserve `requestId`, `sessionId`, and `pendingRequest`.
 - `pendingRequest` must not contain authorization data, cookies, tokens, secrets,
   passwords, or temporary upload streams.
 - `NO_CHANGE` means Portal will not resubmit the prompt; the current runtime continues once.

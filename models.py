@@ -102,6 +102,7 @@ class EnsureResourceRequest(BaseModel):
     request_id: str = Field(alias="requestId", min_length=1, max_length=128)
     reason: str | None = Field(default=None, max_length=512)
     project_id: int = Field(alias="projectId", gt=0)
+    session_id: str = Field(alias="sessionId", min_length=1, max_length=128)
     pending_request: PendingRequest = Field(alias="pendingRequest")
     resource: ResourceSpec
 
