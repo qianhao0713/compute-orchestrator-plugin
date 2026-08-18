@@ -1,7 +1,8 @@
 # V5000 model training
 
 Use this path only for training supported Qwen, Llama, and DeepSeek families.
-V5000 has 96 GiB VRAM per GPU and accepts only these exact Portal tuples:
+V5000 is a domestic accelerator cluster, and `nhmegatron` is its
+domestic-accelerator training framework. V5000 has 96 GiB VRAM per card and accepts only these exact Portal tuples:
 
 | GPUs | CPU | RAM GiB |
 | ---: | ---: | ---: |
@@ -12,6 +13,11 @@ V5000 has 96 GiB VRAM per GPU and accepts only these exact Portal tuples:
 
 Send `resourceType: GPU`, `gpuType: V5000`, and `workerNum: 1`. Select the
 smallest tuple that supports the documented example and parallel strategy.
+
+After migration to V5000, run `xpu-smi` to enumerate and count accelerator
+cards. Do not use `nvidia-smi` for V5000 card discovery, do not fall back to it,
+and do not treat its failure or empty output as a missing-card condition. Compare
+the `xpu-smi` device count with the requested Portal `gpuCount` before training.
 
 ## Local official-example snapshot
 
@@ -28,7 +34,7 @@ platform's installed `nhmegatron` code and environment, not directly from the
 plugin snapshot.
 
 Use only the fixed Megatron/PyTorch environment and code already provided by the
-V5000 platform. The canonical repository is
+V5000 platform. The canonical domestic-accelerator repository is
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/` on branch `main`.
 `zj_examples/V5000` is a path relative to that repository root; it is not a path
 under the user's current project directory. Locate the platform's checkout
@@ -86,6 +92,10 @@ combination unsupported.
 
 Prepare stable datasets, checkpoints, converted model artifacts, configuration
 values, output paths, and handoff state before expansion when possible. In the
-continuation prompt, name the official source example under
-`zj_examples/V5000`, any minimally derived script, its parameter diff, and the
-VRAM budget. Explicitly prohibit from-scratch training or launcher code.
+continuation prompt, explicitly state that V5000 is a domestic accelerator
+cluster, `nhmegatron` is its domestic-accelerator framework, and card
+enumeration must use `xpu-smi` rather than `nvidia-smi`. Require the new
+runtime to compare the `xpu-smi` count with the requested `gpuCount`. Also name
+the official source example under `zj_examples/V5000`, any minimally derived
+script, its parameter diff, and the VRAM budget. Explicitly prohibit
+from-scratch training or launcher code.

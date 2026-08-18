@@ -43,8 +43,8 @@ Portal can provide:
 
 - CPU-only environments with 1–32 CPU cores;
 - Z1120 GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
-- V5000 training environments with 96 GiB VRAM per GPU, represented by
-  `gpuType: "V5000"`;
+- V5000 domestic-accelerator training environments with 96 GiB VRAM per card,
+  represented by `gpuType: "V5000"`;
 - GPU counts of 1, 2, 4, or 8;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
@@ -56,15 +56,19 @@ hardware aliases for Z1120.
 Use only these exact Z1120 `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
 `(2,16,128)`, `(4,32,256)`, and `(8,64,512)`.
 
-Use V5000 only for training supported Qwen, Llama, and DeepSeek models. Its
-environment, repository, conversion tools, examples, and launch scripts are
-fixed. Do not write training code or launchers from scratch. A derived launcher
+Use V5000 only for training supported Qwen, Llama, and DeepSeek models. V5000
+is a domestic accelerator cluster, and `nhmegatron` is its domestic-accelerator
+training framework. Its environment, repository, conversion tools, examples,
+and launch scripts are fixed. Do not write training code or launchers from scratch. A derived launcher
 is allowed only by copying the closest official V5000 example and making minimal,
 reviewable model/hyperparameter changes after a VRAM estimate. Read
 [references/v5000-training.md](references/v5000-training.md) and search the local
 snapshot at `references/nhmegatron/zj_examples/V5000` before planning or
-continuing a V5000 task. Do not fetch the same examples from the web when the
-local snapshot contains the required template.
+continuing a V5000 task. After switching to V5000, use `xpu-smi`, not
+`nvidia-smi`, to detect and count accelerator cards. Do not interpret a missing
+or empty `nvidia-smi` result as evidence that V5000 cards are unavailable. Do
+not fetch the same examples from the web when the local snapshot contains the
+required template.
 
 `workerNum` currently defaults to `1` unless the runtime and Portal explicitly
 support a different value. Do not assume that requesting multiple GPUs implies
@@ -191,9 +195,18 @@ It should report:
 18. When Portal returns `NO_CHANGE`, no machine switch occurs and Portal does not
     submit `pendingRequest`; continue the task exactly once in the current
     container.
-19. After the user confirms a switch, complete all safe CPU-suitable preparation
-    before provisioning. Use the target machine for environment installation,
-    hardware validation, and the core compute workload, not for avoidable downloads or preparation.
+19. Complete all safe CPU-suitable preparation before provisioning. Use the
+    target machine for environment installation, hardware validation, and the
+    core compute workload, not for avoidable downloads or preparation.
+20. Immediately before every new resource-switch request, use
+    `AskUserQuestion` in the language the user is currently using. Explicitly
+    warn that switching resources will interrupt the user's other active sessions
+    and ask whether to proceed. For example, ask Chinese users
+    `切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？` and
+    English users `Switching resources will interrupt your other active sessions.
+    Do you want to proceed with the resource switch?` Submit the request only
+    after an explicit affirmative answer for the current target specification.
+    Earlier general consent does not satisfy this final confirmation gate.
 
 ## End-to-end procedure
 
@@ -381,36 +394,12 @@ Adapt code to supported Z1120 execution where possible without changing the
 scientific target. Otherwise explain that the workload is incompatible with the
 available GPU fleet.
 
-### Phase 5: Complete pre-switch data preparation
-
-After the user confirms that a resource switch is needed, do not immediately submit the provisioning request. First complete preparation work that does not require the target GPU or larger target machine, can safely run in the current CPU container, produces reusable artifacts, and reduces idle time on scarce GPU resources.
-
-Typical work includes downloading model weights and datasets, verifying checksums, extracting archives, cloning repositories, checking out revisions, generating configuration files, preparing manifests or splits, writing launch scripts, and persisting the resource plan.
-
-Do not perform preparation in the current container when it itself requires the target resource or would exceed current CPU/RAM limits.
-
-Write all reusable artifacts to stable shared storage such as the project NAS working directory. Do not rely on `/tmp`, container-local caches, shell history, in-memory state, temporary upload URLs, or paths unavailable from the target runtime.
-
-Before requesting the switch, create or update a persistent handoff record containing the task objective, repository path and revision, completed preparation steps, model and dataset paths, checksums when available, generated configuration and launch-script paths, remaining environment dependencies, the exact next command, expected outputs, and known assumptions.
-
-Avoid duplicate downloads. Inspect stable destinations, partial files, checksums, and metadata first, and use resumable downloads when supported.
-
-Preferred sequence:
-
-```text
-user confirms resource switch
-→ finish CPU-suitable data/model/repository preparation
-→ persist and verify all artifacts
-→ construct pendingRequest from persisted state
-→ submit Portal resource request
-```
-
-### Phase 6: Inspect current resources
+### Phase 5: Inspect current resources
 
 First call `get_resource_status` and use `currentResource` as the Portal-level
 description of the container currently serving the user. Then inspect the local
-runtime to verify effective cgroup limits, free memory, free VRAM, CUDA
-visibility, and transient resource pressure.
+runtime to verify effective cgroup limits, free memory, accelerator memory,
+cluster-appropriate device visibility, and transient resource pressure.
 
 `currentResource` is preferred for comparing provisioned specifications across
 machines. Local inspection is preferred for deciding whether the workload can
@@ -419,27 +408,34 @@ and report the discrepancy.
 
 Inspect the effective container limits, not only host hardware.
 
-Useful commands include:
+Use the common container checks for every cluster:
 
 ```bash
 nproc
 free -b
 cat /sys/fs/cgroup/cpu.max 2>/dev/null || true
 cat /sys/fs/cgroup/memory.max 2>/dev/null || true
-nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
-python - <<'PY'
-import os
-try:
-    import torch
-    print({
-        "cuda_available": torch.cuda.is_available(),
-        "device_count": torch.cuda.device_count(),
-        "cuda_runtime": torch.version.cuda,
-    })
-except Exception as exc:
-    print({"torch_probe_error": str(exc)})
-PY
 ```
+
+Then use the probe that matches `currentResource.gpuType`.
+
+For Z1120, use NVIDIA tooling:
+
+```bash
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
+```
+
+For V5000, use domestic-accelerator tooling:
+
+```bash
+xpu-smi
+```
+
+Count V5000 cards from the devices reported by `xpu-smi`. Never use
+`nvidia-smi` to determine V5000 card count, and never fall back from
+`xpu-smi` to `nvidia-smi` on V5000. Use the fixed V5000 environment and its
+framework-specific probe only as an additional check; do not require generic
+PyTorch CUDA discovery to identify V5000 cards.
 
 Normalize the current resources and the required resources into comparable
 values.
@@ -453,12 +449,24 @@ Current resources are sufficient only when all required dimensions fit:
 - enough GPUs;
 - enough free VRAM per process or shard;
 - supported distributed topology;
-- required runtime and CUDA compatibility.
+- required cluster-specific runtime and accelerator compatibility.
 
 Use headroom. Do not start a job that is estimated to consume effectively all
 available RAM or VRAM.
 
-### Phase 7: Execute locally when sufficient
+Make the resource-switch decision only after completing this inspection:
+
+- if the current container is sufficient, continue directly to Phase 6;
+- if the current container is insufficient, continue to Phase 7 before
+  requesting a resource switch;
+- do not prepare data or install dependencies merely because Phase 4 estimated
+  a target resource. Phase 5 inspection determines which branch applies.
+
+### Phase 6: Execute locally when sufficient
+
+When Phase 5 confirms that the current container is sufficient, execute the
+task normally in the current container. Do not perform the pre-switch workflow
+and do not request a resource switch.
 
 Before the full run:
 
@@ -471,6 +479,56 @@ Before the full run:
 Capture logs and resource metrics. Use deterministic seeds and preserve the
 environment/configuration needed for reproducibility.
 
+### Phase 7: Complete pre-switch preparation when insufficient
+
+Only when Phase 5 confirms that the current container is insufficient, complete
+preparation work that does not depend on the target GPU, larger target machine,
+or target runtime before submitting the provisioning request. The preparation
+must fit safely within the current container and produce reusable artifacts that
+reduce idle time after the switch.
+
+Typical work includes downloading model weights and datasets, verifying
+checksums, extracting archives, cloning repositories, checking out revisions,
+generating configuration files, preparing manifests or splits, selecting or
+adapting approved launch scripts, and persisting the resource plan.
+
+Dependency installation is not pre-switch preparation. Do not install or
+upgrade Python packages, system packages, CUDA libraries, framework
+dependencies, or create/modify the execution environment in the old container.
+Record all required dependencies in the handoff and install them only after the
+new container is active. For V5000, continue to follow its fixed environment,
+code, and script rules rather than creating a replacement environment.
+
+Do not perform preparation in the current container when it itself requires the
+target resource or would exceed current CPU/RAM limits.
+
+Write all reusable artifacts to stable shared storage such as the project NAS
+working directory. Do not rely on `/tmp`, container-local caches, shell history,
+in-memory state, temporary upload URLs, or paths unavailable from the target
+runtime.
+
+Before requesting the switch, create or update a persistent handoff record
+containing the task objective, repository path and revision, completed
+preparation steps, model and dataset paths, checksums when available, generated
+configuration and launch-script paths, dependencies to install in the new
+container, the exact next command, expected outputs, and known assumptions.
+
+Avoid duplicate downloads. Inspect stable destinations, partial files,
+checksums, and metadata first, and use resumable downloads when supported.
+
+Preferred sequence:
+
+```text
+estimate required resources
+→ inspect current container resources
+→ if sufficient: execute normally in the current container
+→ if insufficient: finish only resource-independent data/model/repository preparation
+→ persist and verify all artifacts and dependency requirements
+→ use AskUserQuestion in the user's language to warn that other active sessions will be interrupted and ask whether to proceed
+→ only after explicit confirmation, submit Portal resource request
+→ install dependencies in the new container and execute subsequent steps
+```
+
 ### Phase 8: Request resources when insufficient
 
 Call `get_available_clusters` immediately before the status/ensure flow. For GPU
@@ -480,7 +538,7 @@ task's meaning and execution contract; otherwise stop and report that no
 compatible cluster is enabled. Never silently move V5000 fixed-code training to
 Z1120 or run arbitrary code on V5000.
 
-#### 7.1 Query current Portal operation
+#### 8.1 Query current Portal operation
 
 Call `get_resource_status`.
 
@@ -491,7 +549,7 @@ First check the envelope:
 
 Use `data.provisioning` as authoritative.
 
-#### 7.2 No operation in progress
+#### 8.2 No operation in progress
 
 When `provisioning == false`:
 
@@ -502,12 +560,24 @@ When `provisioning == false`:
 5. construct a self-contained `pendingRequest` from the persisted handoff state;
 6. build the smallest sufficient supported resource specification;
 7. write a concise `reason` tied to the task and estimate;
-8. call `ensure_resource`;
-9. verify `code == "00000"`;
-10. compare returned `data.requestId` with the submitted value;
-11. inspect `operationType` and `resourceChanged`;
-12. if a switch/update is active, stop execution in the old runtime and poll;
-13. if Portal returns `NO_CHANGE`, continue the task once in the current runtime.
+8. use `AskUserQuestion` in the language the user is currently using; state
+   that switching resources will interrupt the user's other active sessions and
+   ask whether to proceed with the resource switch;
+9. submit nothing unless the user explicitly confirms this target specification;
+   if the user declines or does not answer affirmatively, stop without calling
+   `ensure_resource`;
+10. call `ensure_resource` immediately after confirmation, without doing more
+    work in the old container;
+11. verify `code == "00000"`;
+12. compare returned `data.requestId` with the submitted value;
+13. inspect `operationType` and `resourceChanged`;
+14. if a switch/update is active, stop execution in the old runtime and poll;
+15. if Portal returns `NO_CHANGE`, continue the task once in the current runtime.
+
+The confirmation is valid only for the resource specification shown to the
+user. Ask again if that specification changes. Once `ensure_resource` succeeds,
+assume the current container may be reclaimed at any moment and perform no
+further preparation or workload execution in it.
 
 CPU request:
 
@@ -564,7 +634,7 @@ Do not include `projectId`, `sessionId`, or `clientMessageId` in caller-supplied
 MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For V5000 use
 `gpuType: "V5000"` and one of its exact fixed tuples.
 
-#### 7.3 Construct a resumable `pendingRequest`
+#### 8.3 Construct a resumable `pendingRequest`
 
 The new container starts a new Claude Code process. The prompt must therefore be
 self-contained and operational, not a vague message such as "continue" or
@@ -588,7 +658,12 @@ The `pendingRequest.message` should contain:
 - expected outputs and success criteria;
 - instructions to inspect persisted state before repeating work.
 
-For V5000, it must also state that `zj_examples/V5000` is relative to the root
+For V5000, it must explicitly state that V5000 is a domestic accelerator
+cluster, `nhmegatron` is its domestic-accelerator training framework, and the
+new runtime must use `xpu-smi` rather than `nvidia-smi` to enumerate and count
+cards. It must require comparing the `xpu-smi` count with the requested
+`gpuCount` before training. It must also state that `zj_examples/V5000` is
+relative to the root
 of the canonical `nhmegatron` repository from
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/`, not relative to the
 current project directory. If the repository is absent, it must instruct the
@@ -603,7 +678,7 @@ A suitable continuation prompt resembles:
 Continue the paper reproduction task in the configured Portal project.
 Work in <stable working directory>. The repository is at <path>.
 Completed: <brief persisted progress>.
-Next: inspect the persisted handoff record and verify the prepared model and data artifacts. For V5000 training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/V5000 as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official V5000 example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
+Next: inspect the persisted handoff record and verify the prepared model and data artifacts. V5000 is a domestic accelerator cluster, and nhmegatron is its domestic-accelerator training framework. On V5000, run xpu-smi to enumerate and count cards, compare the result with the requested gpuCount, and never use or fall back to nvidia-smi for V5000 card discovery. For V5000 training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/V5000 as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official V5000 example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
 resource-related failure occurs, collect measurements and re-run the resource
 assessment workflow.
 ```
@@ -619,7 +694,7 @@ logs needed for continuation, and a concise progress record there.
 The `pendingRequest` is a continuation envelope, not a place for authentication
 or hidden secrets.
 
-#### 7.4 Operation already in progress
+#### 8.4 Operation already in progress
 
 When `provisioning == true`, compare the current `targetResource` with the newly
 required resource.
@@ -655,11 +730,12 @@ If resources differ:
 3. clearly state that the current Portal API cannot replace an unfinished
    operation;
 4. if the user chooses to keep it, continue polling;
-5. if the user chooses replacement, do not pretend to replace it:
-   - use an explicit cancel/replace MCP tool only if the plugin actually exposes
-     one;
+5. if the user chooses replacement, do not treat that keep-versus-replace choice
+   as the final switch confirmation and do not pretend to replace it:
+   - if the plugin exposes an explicit cancel/replace MCP tool, use the same
+     language-matched `AskUserQuestion` confirmation gate immediately before calling it;
    - otherwise wait for the current operation to reach a terminal state, then
-     submit the new request;
+     use the confirmation gate immediately before submitting the new request;
    - report this backend limitation.
 
 Submitting a different `requestId` to `ensure_resource` is not a replacement
@@ -783,7 +859,7 @@ When the failure is genuinely resource-related:
    experiment meaning;
 4. apply and smoke-test that change when appropriate;
 5. otherwise choose the next supported resource tier;
-6. return to Phase 7;
+6. return to Phase 5 and re-inspect the current resources;
 7. limit blind retries.
 
 After repeated failures with the same root cause, stop and explain the evidence
@@ -825,6 +901,9 @@ Before calling `ensure_resource`, validate:
 - the hook-injected `sessionId` is non-empty and at most 128 characters;
 - `clientMessageId` is absent;
 - `pendingRequest.message` is non-empty and at most 200000 characters;
+- for V5000, `pendingRequest.message` states that V5000 is a domestic
+  accelerator cluster, `nhmegatron` is its domestic-accelerator framework, and
+  card enumeration must use `xpu-smi`, not `nvidia-smi`;
 - `pendingRequest.parts` contains at most 100 items;
 - `pendingRequest.model`, when present, is at most 256 characters;
 - `pendingRequest.workingDirectory`, when present, is at most 1024 characters
@@ -844,7 +923,11 @@ Before calling `ensure_resource`, validate:
   field;
 - V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
-- the available-cluster response includes the selected GPU type.
+- the available-cluster response includes the selected GPU type;
+- `AskUserQuestion` warned, in the language the user is currently using, that
+  switching resources will interrupt the user's other active sessions, and
+  received an explicit affirmative answer for this exact target specification
+  immediately before this new switch request.
 
 ## Compact decision algorithm
 
@@ -858,26 +941,27 @@ understand task
      execute
   else:
      GET available clusters and filter GPU candidates
-     obtain user confirmation when required
      complete CPU-suitable model/data/repository preparation
      persist and verify handoff artifacts
      GET current provisioning state
      → if no active operation:
           verify persisted preparation
           build self-contained pendingRequest
-          POST smallest sufficient supported specification plus project/message context
+          AskUserQuestion in the user's language: warn that switching resources interrupts other active sessions and ask whether to proceed
+          → affirmative: immediately POST smallest sufficient supported specification plus project/message context
+          → otherwise: stop without POST
        else if active target equals required target:
           reuse and poll active operation
        else:
           ask keep-versus-replace
           → keep: poll active operation
           → replace:
-               use explicit cancel/replace API if available
-               otherwise wait for terminal state, then POST new specification
+               before any explicit cancel/replace call, ask the language-matched AskUserQuestion confirmation
+               otherwise wait for terminal state, ask the same confirmation, then POST only on affirmation
      → poll until provisioning=false
      → if successful and machine switched:
           Portal submits pendingRequest in the new Runtime
-          new Runtime re-inspects resources
+          new Runtime re-inspects resources with `xpu-smi` on V5000 or `nvidia-smi` on Z1120
           verifies prepared artifacts
           uses fixed V5000 environment or installs required target dependencies
           smoke test
