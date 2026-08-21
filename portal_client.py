@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
+import os
 from typing import Any
 
 import httpx
@@ -48,20 +51,61 @@ class PortalClient:
             "Accept": "application/json",
         }
 
+    def _log_request(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: Any = None,
+    ) -> None:
+        """Persist one sanitized Portal request before sending it."""
+        log_dir = self._settings.plugin_log_dir
+        log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "method": method.upper(),
+            "url": url,
+            "headers": {
+                key: "[REDACTED]" if key.lower() == "authorization" else value
+                for key, value in headers.items()
+            },
+            "body": body,
+        }
+        payload = (json.dumps(record, ensure_ascii=False, default=str) + "\n").encode(
+            "utf-8"
+        )
+        log_path = log_dir / "portal_requests.jsonl"
+        descriptor = os.open(
+            log_path,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+            0o600,
+        )
+        try:
+            os.write(descriptor, payload)
+        finally:
+            os.close(descriptor)
+
     async def get_current_provisioning(self) -> dict[str, Any]:
+        url = (
+            f"{self._settings.portal_base_url}"
+            "/scientist/deployment/provisioning/current"
+        )
+        headers = self._headers()
+        self._log_request(method="GET", url=url, headers=headers)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(
-                f"{self._settings.portal_base_url}/scientist/deployment/provisioning/current",
-                headers=self._headers(),
-            )
+            response = await client.get(url, headers=headers)
         return self._parse(response)
 
     async def get_available_clusters(self) -> dict[str, Any]:
+        url = (
+            f"{self._settings.portal_base_url}"
+            "/scientist/deployment/clusters/available"
+        )
+        headers = self._headers()
+        self._log_request(method="GET", url=url, headers=headers)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(
-                f"{self._settings.portal_base_url}/scientist/deployment/clusters/available",
-                headers=self._headers(),
-            )
+            response = await client.get(url, headers=headers)
         return self._parse_list(response, key="clusters")
 
     async def ensure_resource(
@@ -69,12 +113,12 @@ class PortalClient:
     ) -> dict[str, Any]:
         # On a transport timeout, retry this exact object so requestId and
         # pendingRequest remain unchanged.
+        url = f"{self._settings.portal_base_url}/scientist/deployment/ensure"
+        headers = self._headers()
+        body = request.model_dump(by_alias=True, exclude_none=False)
+        self._log_request(method="POST", url=url, headers=headers, body=body)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                f"{self._settings.portal_base_url}/scientist/deployment/ensure",
-                headers=self._headers(),
-                json=request.model_dump(by_alias=True, exclude_none=False),
-            )
+            response = await client.post(url, headers=headers, json=body)
         return self._parse(response)
 
     @classmethod

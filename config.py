@@ -12,6 +12,7 @@ class Settings:
     portal_access_token: str
     portal_project_id: int
     stable_workspace_root: Path
+    plugin_log_dir: Path = Path("/home/scientist/.claude/logs")
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 30.0
     write_timeout_seconds: float = 30.0
@@ -27,6 +28,9 @@ class Settings:
         workspace = os.environ.get(
             "AI_SCIENTIST_STABLE_WORKSPACE_ROOT", "/home/scientist"
         ).strip()
+        plugin_log_dir = os.environ.get(
+            "PLUGIN_LOG_DIR", "/home/scientist/.claude/logs/"
+        ).strip()
 
         if not base_url:
             raise RuntimeError("PORTAL_BASE_URL is required")
@@ -34,6 +38,8 @@ class Settings:
             raise RuntimeError("PORTAL_ACCESS_TOKEN is required")
         if not workspace:
             raise RuntimeError("AI_SCIENTIST_STABLE_WORKSPACE_ROOT is required")
+        if not plugin_log_dir:
+            raise RuntimeError("PLUGIN_LOG_DIR must not be empty")
 
         project_id = _resolve_project_id(project_id_raw, workspace)
 
@@ -42,6 +48,7 @@ class Settings:
             portal_access_token=token,
             portal_project_id=project_id,
             stable_workspace_root=Path(workspace).expanduser().resolve(),
+            plugin_log_dir=Path(plugin_log_dir).expanduser().resolve(),
             connect_timeout_seconds=float(
                 os.environ.get("PORTAL_CONNECT_TIMEOUT_SECONDS", "5")
             ),

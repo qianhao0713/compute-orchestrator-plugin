@@ -70,6 +70,8 @@ than stated by the user.
 export PORTAL_BASE_URL="https://portal.example.com"
 export PORTAL_ACCESS_TOKEN="..." # raw token or "Bearer ..." are both accepted
 export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist/project{project_id}"
+# Optional; defaults to /home/scientist/.claude/logs/
+# export PLUGIN_LOG_DIR="/path/to/plugin/logs/"
 # Optional explicit override:
 # export PORTAL_PROJECT_ID="123456"
 ```
@@ -80,7 +82,10 @@ empty, the server extracts the ID from the final directory name of
 `project{project_id}`. MCP callers do
 not supply or generate `project_id`; both resource requests and handoff records
 use this server-side value. Do not commit the Portal token. The stable workspace
-root must be mounted and accessible from both the old and new containers.
+root must be mounted and accessible from both the old and new containers. Before
+each Portal HTTP request, the plugin appends the method, URL, sanitized headers,
+and JSON body to `PLUGIN_LOG_DIR/portal_requests.jsonl`. Authorization is
+redacted. A logging failure prevents the Portal request from being sent.
 
 ## Install dependencies
 
