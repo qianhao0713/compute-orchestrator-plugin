@@ -64,6 +64,12 @@ code may require GPU compute. If so, it must load the Skill before running setup
 or workload commands. This also covers GPU needs discovered by Claude rather
 than stated by the user.
 
+The plugin also denies Bash commands that directly call Portal with `curl`,
+`wget`, Python HTTP clients, or similar tools. Portal traffic must go through the
+MCP tools so endpoint construction, request validation, trusted session context,
+and audit logging cannot be bypassed. This guard applies even when the Skill has
+not loaded.
+
 ## Required environment variables
 
 ```bash
