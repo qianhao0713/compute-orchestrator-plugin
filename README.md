@@ -10,7 +10,8 @@ resumes the task in the new Claude Code runtime.
 2. Estimate CPU, RAM, GPU, VRAM, and topology requirements.
 3. Compare requirements with Portal `currentResource` and local effective limits.
 4. When a switch is required and confirmed, finish CPU-suitable preparation first:
-   download models/data, clone repositories, verify artifacts, and persist a handoff.
+   download models/data, clone repositories, and verify persistent artifacts.
+   Prepare a continuation message only when `ENABLE_HANDOFF=true`.
 5. Call Portal `ensure` with `pendingRequest`.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
 7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
@@ -78,6 +79,8 @@ export PORTAL_ACCESS_TOKEN="..." # raw token or "Bearer ..." are both accepted
 export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist/project{project_id}"
 # Optional; defaults to /home/scientist/.claude/logs/
 # export PLUGIN_LOG_DIR="/path/to/plugin/logs/"
+# Optional; defaults to false. Set true to send a continuation message.
+# export ENABLE_HANDOFF="true"
 # Optional explicit override:
 # export PORTAL_PROJECT_ID="123456"
 ```
@@ -92,6 +95,11 @@ root must be mounted and accessible from both the old and new containers. Before
 each Portal HTTP request, the plugin appends the method, URL, sanitized headers,
 and JSON body to `PLUGIN_LOG_DIR/portal_requests.jsonl`. Authorization is
 redacted. A logging failure prevents the Portal request from being sent.
+
+`ENABLE_HANDOFF` accepts `true/false`, `1/0`, `yes/no`, or `on/off`. It
+defaults to `false`. When disabled, callers do not need to prepare continuation
+text and the server forces `pendingRequest.message` to an empty string. When
+enabled, `pendingRequest.message` must be non-empty and self-contained.
 
 ## Install dependencies
 

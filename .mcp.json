@@ -9,6 +9,7 @@
         "PORTAL_ACCESS_TOKEN": "${PORTAL_ACCESS_TOKEN}",
         "PORTAL_PROJECT_ID": "${PORTAL_PROJECT_ID:-}",
         "PLUGIN_LOG_DIR": "${PLUGIN_LOG_DIR:-/home/scientist/.claude/logs/}",
+        "ENABLE_HANDOFF": "${ENABLE_HANDOFF:-false}",
         "AI_SCIENTIST_STABLE_WORKSPACE_ROOT": "${AI_SCIENTIST_STABLE_WORKSPACE_ROOT}",
         "PYTHONUNBUFFERED": "1"
       }

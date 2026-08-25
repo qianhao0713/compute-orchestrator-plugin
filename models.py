@@ -80,7 +80,7 @@ class ResourceSpec(BaseModel):
 class PendingRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    message: str = Field(min_length=1, max_length=200_000)
+    message: str = Field(default="", max_length=200_000)
     parts: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     model: str | None = Field(default=None, max_length=256)
     working_directory: str | None = Field(

@@ -140,6 +140,12 @@ Inputs:
 The MCP server, not the model, should own HTTP authentication and Portal base URL
 configuration.
 
+`get_resource_status` also returns the server-side `handoffEnabled` flag. When it
+is `false` (the default), do not prepare continuation text:
+`ensure_resource` forces `pendingRequest.message` to `""`. When it is `true`,
+construct a non-empty, self-contained continuation message as described below.
+
+
 ### Optional `inspect_current_resources`
 
 Prefer a dedicated read-only MCP tool when available. Otherwise use local shell
@@ -167,8 +173,10 @@ It should report:
 5. A successful `ensure_resource` response means accepted or reused, not ready.
 6. `currentResource` is the Portal-reported specification currently serving the
    user; `targetResource` is the requested destination during provisioning.
-7. Every `ensure_resource` request must carry the resumable task context required
-   by Portal: `projectId`, `sessionId`, and `pendingRequest`.
+7. Every `ensure_resource` request must carry `projectId`, `sessionId`, and
+   `pendingRequest`. When `handoffEnabled == false`, require
+   `pendingRequest.message == ""`; when it is true, require a non-empty resumable
+   continuation message.
    Never generate or supply `projectId`; the MCP server reads it from
    `PORTAL_PROJECT_ID` or extracts it from the stable workspace basename.
    Never generate or manually supply `sessionId`; the plugin hook injects the
@@ -200,13 +208,25 @@ It should report:
     core compute workload, not for avoidable downloads or preparation.
 20. Immediately before every new resource-switch request, use
     `AskUserQuestion` in the language the user is currently using. Explicitly
-    warn that switching resources will interrupt the user's other active sessions
-    and ask whether to proceed. For example, ask Chinese users
-    `切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？` and
-    English users `Switching resources will interrupt your other active sessions.
-    Do you want to proceed with the resource switch?` Submit the request only
+    warn that a successful resource switch will interrupt the user's other active
+    sessions, ask whether to proceed, and explain that insufficient resources
+    cause the request to queue before switching automatically after the queue
+    succeeds. For example, ask Chinese users
+    `成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。`
+    and English users
+    `A successful resource switch will interrupt your other active sessions. Please confirm whether to proceed with the resource switch. If resources are currently insufficient, the request will be queued first, and resources will switch automatically once queuing succeeds.` Submit the request only
     after an explicit affirmative answer for the current target specification.
     Earlier general consent does not satisfy this final confirmation gate.
+
+21. When deriving a training script from an official template, remove or scope
+    down any blanket process-killing commands. Specifically, replace
+    `pkill -9 python` with a targeted pattern that only matches training
+    processes (for example,
+    `pkill -9 -f "torchrun\|pretrain_v\|xmegatron_ext"`). Never copy
+    `pkill -9 python`, `killall python`, `fuser -k`, or similar broad-spectrum
+    kill commands into generated scripts, because they will kill the agent
+    infrastructure (`uvicorn`, `compute-orchestrator`) running in the same
+    container.
 
 ## End-to-end procedure
 
@@ -554,15 +574,21 @@ Use `data.provisioning` as authoritative.
 When `provisioning == false`:
 
 1. confirm that all CPU-suitable pre-switch preparation has completed;
-2. verify that model, dataset, repository, configuration, and handoff artifacts are present on stable shared storage;
+2. verify that model, dataset, repository, and configuration artifacts are
+   present on stable shared storage; verify handoff artifacts when
+   `handoffEnabled == true`;
 3. generate a stable UUID-based `requestId`;
 4. rely on the MCP server's environment-resolved project ID;
-5. construct a self-contained `pendingRequest` from the persisted handoff state;
+5. when `handoffEnabled == true`, construct a self-contained
+   `pendingRequest.message` from persisted state; otherwise do not prepare the
+   message and let the server send it as an empty string;
 6. build the smallest sufficient supported resource specification;
 7. write a concise `reason` tied to the task and estimate;
 8. use `AskUserQuestion` in the language the user is currently using; state
-   that switching resources will interrupt the user's other active sessions and
-   ask whether to proceed with the resource switch;
+   that a successful resource switch will interrupt the user's other active
+   sessions, ask whether to proceed, and explain that insufficient resources
+   cause the request to queue before switching automatically after the queue
+   succeeds;
 9. submit nothing unless the user explicitly confirms this target specification;
    if the user declines or does not answer affirmatively, stop without calling
    `ensure_resource`;
@@ -634,7 +660,11 @@ Do not include `projectId`, `sessionId`, or `clientMessageId` in caller-supplied
 MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For V5000 use
 `gpuType: "V5000"` and one of its exact fixed tuples.
 
-#### 8.3 Construct a resumable `pendingRequest`
+#### 8.3 Construct a resumable `pendingRequest` only when enabled
+
+Apply this section only when `get_resource_status.handoffEnabled == true`. When
+it is false, skip all continuation-message preparation; the server forces
+`pendingRequest.message` to `""` even if the caller supplies text.
 
 The new container starts a new Claude Code process. The prompt must therefore be
 self-contained and operational, not a vague message such as "continue" or
@@ -799,9 +829,12 @@ When Portal is performing a real resource transition:
 
 1. persist all state before the old container becomes unavailable;
 2. stop launching new compute work in the old container;
-3. allow Portal to switch routing and submit `pendingRequest`;
-4. in the new Claude Code runtime, treat the automatically submitted prompt as
-   the authoritative continuation request;
+3. when `handoffEnabled == true`, allow Portal to switch routing and submit the
+   non-empty `pendingRequest.message`; in the new Claude Code runtime, treat
+   that automatically submitted prompt as the authoritative continuation request;
+4. when `handoffEnabled == false`, expect `pendingRequest.message == ""` and do
+   not expect automatic task continuation; the user must start or resume work in
+   the new container explicitly;
 5. inspect `currentResource` and local effective resources again;
 6. inspect persisted progress before repeating any step;
 7. repeat a bounded smoke test when appropriate;
@@ -900,8 +933,10 @@ Before calling `ensure_resource`, validate:
   variable is empty; never invent or manually provide it in tool arguments;
 - the hook-injected `sessionId` is non-empty and at most 128 characters;
 - `clientMessageId` is absent;
-- `pendingRequest.message` is non-empty and at most 200000 characters;
-- for V5000, `pendingRequest.message` states that V5000 is a domestic
+- when `handoffEnabled == false`, `pendingRequest.message == ""`;
+- when `handoffEnabled == true`, `pendingRequest.message` is non-empty and at
+  most 200000 characters;
+- when handoff is enabled for V5000, `pendingRequest.message` states that V5000 is a domestic
   accelerator cluster, `nhmegatron` is its domestic-accelerator framework, and
   card enumeration must use `xpu-smi`, not `nvidia-smi`;
 - `pendingRequest.parts` contains at most 100 items;
@@ -942,12 +977,13 @@ understand task
   else:
      GET available clusters and filter GPU candidates
      complete CPU-suitable model/data/repository preparation
-     persist and verify handoff artifacts
-     GET current provisioning state
+     persist and verify reusable artifacts
+     GET current provisioning state and read handoffEnabled
      → if no active operation:
           verify persisted preparation
-          build self-contained pendingRequest
-          AskUserQuestion in the user's language: warn that switching resources interrupts other active sessions and ask whether to proceed
+          if handoffEnabled: build self-contained pendingRequest.message
+          otherwise: leave pendingRequest.message empty
+          AskUserQuestion in the user's language: warn that a successful switch interrupts other active sessions, ask whether to proceed, and explain that insufficient resources queue first and switch automatically once queuing succeeds
           → affirmative: immediately POST smallest sufficient supported specification plus project/message context
           → otherwise: stop without POST
        else if active target equals required target:
@@ -960,7 +996,8 @@ understand task
                otherwise wait for terminal state, ask the same confirmation, then POST only on affirmation
      → poll until provisioning=false
      → if successful and machine switched:
-          Portal submits pendingRequest in the new Runtime
+          if handoffEnabled: Portal submits pendingRequest in the new Runtime
+          otherwise: no automatic continuation prompt is expected
           new Runtime re-inspects resources with `xpu-smi` on V5000 or `nvidia-smi` on Z1120
           verifies prepared artifacts
           uses fixed V5000 environment or installs required target dependencies

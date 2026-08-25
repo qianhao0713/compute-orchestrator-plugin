@@ -32,12 +32,14 @@ def portal_client() -> PortalClient:
 
 @mcp.tool()
 async def get_resource_status() -> dict[str, Any]:
-    """Return the current Portal provisioning state and current/target resources.
+    """Return Portal state plus the server-side handoff-message setting.
 
     `provisioning` is authoritative. The result also includes route switching and
     pending-prompt delivery fields when supplied by Portal.
     """
-    return await portal_client().get_current_provisioning()
+    result = await portal_client().get_current_provisioning()
+    result["handoffEnabled"] = settings().enable_handoff
+    return result
 
 
 @mcp.tool()
@@ -53,11 +55,11 @@ async def get_available_clusters() -> dict[str, Any]:
 @mcp.tool()
 async def ensure_resource(
     request_id: str,
-    pending_message: str,
     resource_type: Literal["CPU", "GPU"],
     cpu: int,
     memory_gib: int,
     gpu_count: int,
+    pending_message: str = "",
     reason: str | None = None,
     gpu_type: str | None = None,
     worker_num: int = 1,
@@ -72,13 +74,24 @@ async def ensure_resource(
     project_id is read from PORTAL_PROJECT_ID and is not a tool argument. Do not
     supply session_id yourself. The plugin's PreToolUse hook injects the current
     Claude Code session ID and missing trusted context fails validation closed.
+    ENABLE_HANDOFF defaults to false; when false, pending_message may be omitted
+    and the server sends pendingRequest.message as an empty string. When true,
+    pending_message must be non-empty.
 
     Use gpu_type='Z1120' for V100 or 'V5000' for V5000. On a network timeout,
     call again with exactly the same request ID and pending request content.
     """
+    current_settings = settings()
+    if current_settings.enable_handoff and not pending_message.strip():
+        raise ValueError(
+            "pending_message must be non-empty when ENABLE_HANDOFF is enabled"
+        )
+    effective_pending_message = (
+        pending_message if current_settings.enable_handoff else ""
+    )
     request = EnsureResourceRequest(
         requestId=request_id,
-        projectId=settings().portal_project_id,
+        projectId=current_settings.portal_project_id,
         sessionId=session_id,
         reason=reason,
         resource=ResourceSpec(
@@ -90,7 +103,7 @@ async def ensure_resource(
             workerNum=worker_num,
         ),
         pendingRequest=PendingRequest(
-            message=pending_message,
+            message=effective_pending_message,
             parts=parts or [],
             model=model,
             workingDirectory=working_directory,

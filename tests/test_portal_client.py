@@ -200,6 +200,45 @@ def test_plugin_log_dir_defaults_and_accepts_override(monkeypatch, tmp_path):
     assert Settings.from_env().plugin_log_dir == custom_log_dir.resolve()
 
 
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [("true", True), ("1", True), ("yes", True), ("on", True),
+     ("false", False), ("0", False), ("no", False), ("off", False)],
+)
+def test_enable_handoff_parsing(monkeypatch, tmp_path, raw_value, expected):
+    monkeypatch.setenv("PORTAL_BASE_URL", "portal.example.com")
+    monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("PORTAL_PROJECT_ID", "1")
+    monkeypatch.setenv(
+        "AI_SCIENTIST_STABLE_WORKSPACE_ROOT", str(tmp_path / "project1")
+    )
+    monkeypatch.setenv("ENABLE_HANDOFF", raw_value)
+    assert Settings.from_env().enable_handoff is expected
+
+
+def test_enable_handoff_defaults_to_false(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTAL_BASE_URL", "portal.example.com")
+    monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("PORTAL_PROJECT_ID", "1")
+    monkeypatch.setenv(
+        "AI_SCIENTIST_STABLE_WORKSPACE_ROOT", str(tmp_path / "project1")
+    )
+    monkeypatch.delenv("ENABLE_HANDOFF", raising=False)
+    assert Settings.from_env().enable_handoff is False
+
+
+def test_invalid_enable_handoff_is_rejected(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTAL_BASE_URL", "portal.example.com")
+    monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("PORTAL_PROJECT_ID", "1")
+    monkeypatch.setenv(
+        "AI_SCIENTIST_STABLE_WORKSPACE_ROOT", str(tmp_path / "project1")
+    )
+    monkeypatch.setenv("ENABLE_HANDOFF", "sometimes")
+    with pytest.raises(RuntimeError, match="ENABLE_HANDOFF"):
+        Settings.from_env()
+
+
 def test_empty_plugin_log_dir_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("PORTAL_BASE_URL", "portal.example.com")
     monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "token")

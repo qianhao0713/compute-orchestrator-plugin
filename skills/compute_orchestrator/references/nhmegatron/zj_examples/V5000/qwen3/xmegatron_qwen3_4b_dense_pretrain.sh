@@ -78,8 +78,7 @@ SAVE_CKPT=${SAVE_CKPT:-true}
 
 OUTPUT_BASEPATH=${OUTPUT_DIR:-${ROOT_DIR}/output}
 
-pkill -9 python || true
-pkill -9 torchrun || true
+pkill -9 -f "torchrun\|pretrain_v\|xmegatron_ext" || true
 
 GPUS_PER_NODE=`echo "$CUDA_VISIBLE_DEVICES" | awk -F, '{print NF}'`
 MASTER_ADDR=${MASTER_ADDR:-"localhost"}

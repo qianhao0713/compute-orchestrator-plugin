@@ -13,6 +13,7 @@ class Settings:
     portal_project_id: int
     stable_workspace_root: Path
     plugin_log_dir: Path = Path("/home/scientist/.claude/logs")
+    enable_handoff: bool = False
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 30.0
     write_timeout_seconds: float = 30.0
@@ -31,6 +32,7 @@ class Settings:
         plugin_log_dir = os.environ.get(
             "PLUGIN_LOG_DIR", "/home/scientist/.claude/logs/"
         ).strip()
+        enable_handoff = _parse_bool_env("ENABLE_HANDOFF", default=False)
 
         if not base_url:
             raise RuntimeError("PORTAL_BASE_URL is required")
@@ -49,6 +51,7 @@ class Settings:
             portal_project_id=project_id,
             stable_workspace_root=Path(workspace).expanduser().resolve(),
             plugin_log_dir=Path(plugin_log_dir).expanduser().resolve(),
+            enable_handoff=enable_handoff,
             connect_timeout_seconds=float(
                 os.environ.get("PORTAL_CONNECT_TIMEOUT_SECONDS", "5")
             ),
@@ -62,6 +65,20 @@ class Settings:
                 os.environ.get("PORTAL_POOL_TIMEOUT_SECONDS", "5")
             ),
         )
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(
+        f"{name} must be one of true/false, 1/0, yes/no, or on/off"
+    )
 
 
 def _normalize_portal_base_url(raw_value: str) -> str:

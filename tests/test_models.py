@@ -104,6 +104,10 @@ def test_cpu_rejects_gpu_count():
         )
 
 
+def test_pending_request_allows_empty_message():
+    assert PendingRequest().message == ""
+
+
 def test_pending_request_rejects_secret_key():
     with pytest.raises(ValidationError):
         PendingRequest(message="continue", parts=[{"accessToken": "secret"}])
