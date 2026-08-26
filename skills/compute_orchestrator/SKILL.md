@@ -191,8 +191,9 @@ It should report:
     after a terminal failure.
 12. Query available clusters before expansion and exclude unavailable GPU types.
 13. Do not submit repeated requests merely to accelerate a queue.
-14. Do not claim that an in-progress Portal operation was overwritten unless the
-    backend exposes and successfully executes an explicit cancel/replace API.
+14. When `provisioning == true`, submit a new resource request only after the
+    user confirms that doing so cancels the existing queued task and queues the
+    new task from the beginning.
 15. Do not start a destructive, expensive, or long-running job until the code,
     inputs, outputs, and resource plan have been checked.
 16. Ask the user only when a decision materially changes cost, resource
@@ -206,7 +207,8 @@ It should report:
 19. Complete all safe CPU-suitable preparation before provisioning. Use the
     target machine for environment installation, hardware validation, and the
     core compute workload, not for avoidable downloads or preparation.
-20. Immediately before every new resource-switch request, use
+20. Immediately before every new resource-switch request when
+    `provisioning == false`, use
     `AskUserQuestion` in the language the user is currently using. Explicitly
     warn that a successful resource switch will interrupt the user's other active
     sessions, ask whether to proceed, and explain that insufficient resources
@@ -544,7 +546,7 @@ estimate required resources
 → if sufficient: execute normally in the current container
 → if insufficient: finish only resource-independent data/model/repository preparation
 → persist and verify all artifacts and dependency requirements
-→ use AskUserQuestion in the user's language to warn that other active sessions will be interrupted and ask whether to proceed
+→ use the confirmation prompt that matches the latest provisioning state
 → only after explicit confirmation, submit Portal resource request
 → install dependencies in the new container and execute subsequent steps
 ```
@@ -726,50 +728,24 @@ or hidden secrets.
 
 #### 8.4 Operation already in progress
 
-When `provisioning == true`, compare the current `targetResource` with the newly
-required resource.
+When `provisioning == true`, do not compare `targetResource` with the newly
+required resource and do not attempt to detect an equivalent request. Always
+treat the active operation as a different target operation:
 
-Normalize missing `workerNum` to `1`. Keep `Z1120` and `V5000` distinct.
-Compare at least:
-
-- resource type;
-- CPU;
-- memory GiB;
-- GPU type (`Z1120` or `V5000`);
-- GPU count;
-- worker count.
-
-##### Equivalent request
-
-If the resources are equivalent:
-
-- treat the current operation as satisfying the request;
-- normally do not create a new business request;
-- poll the current operation;
-- if the integration contract requires calling POST to retrieve the same
-  operation, reuse the existing `data.requestId`, not a newly generated ID;
-- verify that the returned request ID still identifies the existing operation.
-
-##### Different request
-
-If resources differ:
-
-1. explain the active request and the newly required request;
-2. ask whether the user wants to keep waiting for the active request or replace
-   it;
-3. clearly state that the current Portal API cannot replace an unfinished
-   operation;
-4. if the user chooses to keep it, continue polling;
-5. if the user chooses replacement, do not treat that keep-versus-replace choice
-   as the final switch confirmation and do not pretend to replace it:
-   - if the plugin exposes an explicit cancel/replace MCP tool, use the same
-     language-matched `AskUserQuestion` confirmation gate immediately before calling it;
-   - otherwise wait for the current operation to reach a terminal state, then
-     use the confirmation gate immediately before submitting the new request;
-   - report this backend limitation.
-
-Submitting a different `requestId` to `ensure_resource` is not a replacement
-mechanism under the current API contract.
+1. use `AskUserQuestion` immediately before submitting the new request;
+2. for Chinese users, use exactly
+   `当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，新任务重新排队，是否确认提交?`;
+3. for English users, use exactly
+   `A task is currently waiting in the queue. Submitting a new queued task will cancel the existing queued task, and the new task will re-enter the queue from the beginning. Do you confirm submission?`;
+4. for users of another language, ask the semantically equivalent question in
+   that language;
+5. treat this question as the final confirmation for the exact new resource
+   specification; do not show the normal `provisioning == false` switch prompt
+   as an additional confirmation;
+6. if the user explicitly confirms, call `ensure_resource` immediately. The
+   existing queued task is canceled and the new task queues from the beginning;
+7. otherwise, do not call `ensure_resource` and continue polling the existing
+   operation only if the user asks to keep waiting.
 
 ### Phase 9: Poll Portal state and handoff
 
@@ -959,10 +935,12 @@ Before calling `ensure_resource`, validate:
 - V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
-- `AskUserQuestion` warned, in the language the user is currently using, that
-  switching resources will interrupt the user's other active sessions, and
-  received an explicit affirmative answer for this exact target specification
-  immediately before this new switch request.
+- when `provisioning == false`, `AskUserQuestion` used the language-matched
+  resource-switch warning and received an explicit affirmative answer for this
+  exact target specification immediately before the request;
+- when `provisioning == true`, `AskUserQuestion` used the fixed
+  queue-cancellation warning in the user's language and received an explicit
+  affirmative answer immediately before the new request.
 
 ## Compact decision algorithm
 
@@ -986,14 +964,11 @@ understand task
           AskUserQuestion in the user's language: warn that a successful switch interrupts other active sessions, ask whether to proceed, and explain that insufficient resources queue first and switch automatically once queuing succeeds
           → affirmative: immediately POST smallest sufficient supported specification plus project/message context
           → otherwise: stop without POST
-       else if active target equals required target:
-          reuse and poll active operation
        else:
-          ask keep-versus-replace
-          → keep: poll active operation
-          → replace:
-               before any explicit cancel/replace call, ask the language-matched AskUserQuestion confirmation
-               otherwise wait for terminal state, ask the same confirmation, then POST only on affirmation
+          treat provisioning=true as a different target without comparing specifications
+          AskUserQuestion with the fixed queue-cancellation warning in the user's language
+          → affirmative: immediately POST the new request; the old queued task is canceled and the new task queues from the beginning
+          → otherwise: do not POST; poll the existing operation only if the user asks to keep waiting
      → poll until provisioning=false
      → if successful and machine switched:
           if handoffEnabled: Portal submits pendingRequest in the new Runtime
