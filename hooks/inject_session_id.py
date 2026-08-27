@@ -9,8 +9,8 @@ from typing import Any
 
 
 EXPECTED_TOOLS = {
-    "mcp__plugin_compute-orchestrator_compute-orchestrator-resource__ensure_resource",
-    "mcp__compute-orchestrator-resource__ensure_resource",
+    "mcp__plugin_compute-orchestrator_res__ensure_resource",
+    "mcp__res__ensure_resource",
 }
 MAX_SESSION_ID_LENGTH = 128
 

@@ -24,7 +24,7 @@
         ]
       },
       {
-        "matcher": "mcp__(plugin_compute-orchestrator_compute-orchestrator-resource|compute-orchestrator-resource)__ensure_resource",
+        "matcher": "mcp__(plugin_compute-orchestrator_res|res)__ensure_resource",
         "hooks": [
           {
             "type": "command",

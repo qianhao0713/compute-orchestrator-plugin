@@ -208,18 +208,13 @@ It should report:
 19. Complete all safe CPU-suitable preparation before provisioning. Use the
     target machine for environment installation, hardware validation, and the
     core compute workload, not for avoidable downloads or preparation.
-20. Immediately before every new resource-switch request when
-    `provisioning == false`, use
-    `AskUserQuestion` in the language the user is currently using. Explicitly
-    warn that a successful resource switch will interrupt the user's other active
-    sessions, ask whether to proceed, and explain that insufficient resources
-    cause the request to queue before switching automatically after the queue
-    succeeds. For example, ask Chinese users
-    `成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。`
-    and English users
-    `A successful resource switch will interrupt your other active sessions. Please confirm whether to proceed with the resource switch. If resources are currently insufficient, the request will be queued first, and resources will switch automatically once queuing succeeds.` Submit the request only
-    after an explicit affirmative answer for the current target specification.
-    Earlier general consent does not satisfy this final confirmation gate.
+20. Immediately before every `ensure_resource` call, use the latest top-level
+    boolean `provisioning` returned by `get_resource_status` to choose exactly
+    one fixed `AskUserQuestion` contract from Phase 8. Use the normal-switch
+    contract when it is `false` and the queued-replacement contract when it is
+    `true`. If it is missing or not a boolean, stop without calling
+    `ensure_resource`. Submit only after the user selects that contract's fixed
+    confirmation option. Earlier general consent does not satisfy this gate.
 
 21. When deriving a training script from an official template, remove or scope
     down any blanket process-killing commands. Specifically, replace
@@ -562,16 +557,49 @@ task's meaning and execution contract; otherwise stop and report that no
 compatible cluster is enabled. Never silently move V5000 fixed-code training to
 Z1120 or run arbitrary code on V5000.
 
+#### Fixed `AskUserQuestion` contracts
+
+For Chinese users, use exactly these objects. When `provisioning == false`:
+
+```json
+{"questions":[{"header":"切换资源","question":"成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。","multiSelect":false,"options":[{"label":"确认切换","description":"确认提交资源切换请求。"},{"label":"取消","description":"不提交资源切换请求。"}]}]}
+```
+
+When `provisioning == true`:
+
+```json
+{"questions":[{"header":"重新排队","question":"当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，新任务重新排队，是否确认提交?","multiSelect":false,"options":[{"label":"确认提交","description":"撤销原排队任务，并提交新的排队任务。"},{"label":"取消","description":"保留原排队任务，不提交新请求。"}]}]}
+```
+
+For English users, preserve the same structure and use:
+
+- normal: header `Switch`; question
+  `A successful resource switch will interrupt your other active sessions. Please confirm whether to proceed with the resource switch. If resources are currently insufficient, the request will be queued first, and resources will switch automatically once queuing succeeds.`;
+  options `Confirm switch` / `Submit the resource-switch request.` and
+  `Cancel` / `Do not submit the resource-switch request.`;
+- queued: header `Requeue`; question
+  `A task is currently waiting in the queue. Submitting a new queued task will cancel the existing queued task, and the new task will re-enter the queue from the beginning. Do you confirm submission?`;
+  options `Confirm submission` / `Cancel the existing queued task and submit
+  the new queued task.` and `Cancel` / `Keep the existing queued task and do
+  not submit a new request.`.
+
+Translate the complete structure for other languages. Always set
+`multiSelect: false`; treat Cancel, Other/free-form text, empty, multiple, and
+unknown answers as rejection.
+
 #### 8.1 Query current Portal operation
 
 Call `get_resource_status`.
 
-First check the envelope:
+The MCP server has already validated and unwrapped the Portal envelope. Read
+the returned top-level fields directly; do not look for `code`, `msg`, `data`,
+or `data.provisioning`. Portal business errors are raised by the MCP server.
 
-- if `code != "00000"`, stop and report `msg` and `traceId`;
-- otherwise inspect `data`.
+Use the top-level `provisioning` field as authoritative. It must be a boolean:
 
-Use `data.provisioning` as authoritative.
+- when `false`, follow Phase 8.2;
+- when `true`, follow Phase 8.4 before any new `ensure_resource` request;
+- when missing or invalid, stop without calling `ensure_resource`.
 
 #### 8.2 No operation in progress
 
@@ -588,11 +616,8 @@ When `provisioning == false`:
    message and let the server send it as an empty string;
 6. build the smallest sufficient supported resource specification;
 7. write a concise `reason` tied to the task and estimate;
-8. use `AskUserQuestion` in the language the user is currently using; state
-   that a successful resource switch will interrupt the user's other active
-   sessions, ask whether to proceed, and explain that insufficient resources
-   cause the request to queue before switching automatically after the queue
-   succeeds;
+8. use the fixed normal-switch `AskUserQuestion` contract above in the user's
+   language;
 9. submit nothing unless the user explicitly confirms this target specification;
    if the user declines or does not answer affirmatively, stop without calling
    `ensure_resource`;
@@ -734,19 +759,15 @@ When `provisioning == true`, do not compare `targetResource` with the newly
 required resource and do not attempt to detect an equivalent request. Always
 treat the active operation as a different target operation:
 
-1. use `AskUserQuestion` immediately before submitting the new request;
-2. for Chinese users, use exactly
-   `当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，新任务重新排队，是否确认提交?`;
-3. for English users, use exactly
-   `A task is currently waiting in the queue. Submitting a new queued task will cancel the existing queued task, and the new task will re-enter the queue from the beginning. Do you confirm submission?`;
-4. for users of another language, ask the semantically equivalent question in
-   that language;
-5. treat this question as the final confirmation for the exact new resource
+1. use the fixed queued-replacement `AskUserQuestion` contract above
+   immediately before submitting the new request;
+2. treat this question as the final confirmation for the exact new resource
    specification; do not show the normal `provisioning == false` switch prompt
    as an additional confirmation;
-6. if the user explicitly confirms, call `ensure_resource` immediately. The
-   existing queued task is canceled and the new task queues from the beginning;
-7. otherwise, do not call `ensure_resource` and continue polling the existing
+3. if the user selects the fixed confirmation option, call `ensure_resource`
+   immediately. The existing queued task is canceled and the new task queues
+   from the beginning;
+4. otherwise, do not call `ensure_resource` and continue polling the existing
    operation only if the user asks to keep waiting.
 
 ### Phase 9: Poll Portal state and handoff
@@ -939,12 +960,13 @@ Before calling `ensure_resource`, validate:
   never request more than 4 cards;
 - Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
-- when `provisioning == false`, `AskUserQuestion` used the language-matched
-  resource-switch warning and received an explicit affirmative answer for this
-  exact target specification immediately before the request;
-- when `provisioning == true`, `AskUserQuestion` used the fixed
-  queue-cancellation warning in the user's language and received an explicit
-  affirmative answer immediately before the new request.
+- the latest `get_resource_status` result contained a top-level boolean
+  `provisioning`; no `data.provisioning` lookup was used;
+- when `provisioning == false`, the fixed normal-switch `AskUserQuestion`
+  contract received its fixed confirmation option immediately before the request;
+- when `provisioning == true`, the fixed queued-replacement `AskUserQuestion`
+  contract received its fixed confirmation option immediately before the new
+  request.
 
 ## Compact decision algorithm
 
@@ -960,18 +982,19 @@ understand task
      GET available clusters and filter GPU candidates
      complete CPU-suitable model/data/repository preparation
      persist and verify reusable artifacts
-     GET current provisioning state and read handoffEnabled
-     → if no active operation:
+     GET current provisioning state; read top-level provisioning and handoffEnabled
+     → if provisioning is missing or non-boolean: stop without POST
+     → if provisioning=false:
           verify persisted preparation
           if handoffEnabled: build self-contained pendingRequest.message
           otherwise: leave pendingRequest.message empty
-          AskUserQuestion in the user's language: warn that a successful switch interrupts other active sessions, ask whether to proceed, and explain that insufficient resources queue first and switch automatically once queuing succeeds
-          → affirmative: immediately POST smallest sufficient supported specification plus project/message context
+          AskUserQuestion with the fixed normal-switch contract in the user's language
+          → fixed confirmation option: immediately POST smallest sufficient supported specification plus project/message context
           → otherwise: stop without POST
-       else:
+       else provisioning=true:
           treat provisioning=true as a different target without comparing specifications
-          AskUserQuestion with the fixed queue-cancellation warning in the user's language
-          → affirmative: immediately POST the new request; the old queued task is canceled and the new task queues from the beginning
+          AskUserQuestion with the fixed queued-replacement contract in the user's language
+          → fixed confirmation option: immediately POST the new request; the old queued task is canceled and the new task queues from the beginning
           → otherwise: do not POST; poll the existing operation only if the user asks to keep waiting
      → poll until provisioning=false
      → if successful and machine switched:

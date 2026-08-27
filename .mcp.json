@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "compute-orchestrator-resource": {
+    "res": {
       "type": "stdio",
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/start-mcp",
       "args": [],

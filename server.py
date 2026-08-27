@@ -11,7 +11,7 @@ from portal_client import PortalClient
 from resource_inspector import inspect_current_resources as inspect_local_resources
 
 
-mcp = FastMCP("compute-orchestrator-resource")
+mcp = FastMCP("res")
 _settings: Settings | None = None
 _client: PortalClient | None = None
 
