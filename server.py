@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel, Field
 
 from config import Settings
 from handoff_manager import HandoffRecord, inspect_artifacts, write_handoff
@@ -14,6 +15,41 @@ from resource_inspector import inspect_current_resources as inspect_local_resour
 mcp = FastMCP("compute-orchestrator-resource")
 _settings: Settings | None = None
 _client: PortalClient | None = None
+
+
+class ResourceSwitchConfirmation(BaseModel):
+    confirm: bool = Field(
+        title="Confirm submission",
+        description="Confirm that the resource request should be submitted now.",
+    )
+
+
+QUEUE_CONFIRMATION_ZH = (
+    "当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，"
+    "新任务重新排队，是否确认提交?"
+)
+QUEUE_CONFIRMATION_EN = (
+    "A task is currently waiting in the queue. Submitting a new queued task "
+    "will cancel the existing queued task, and the new task will re-enter the "
+    "queue from the beginning. Do you confirm submission?"
+)
+SWITCH_CONFIRMATION_ZH = (
+    "成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？"
+    "如果当前资源不足会先进行排队，排队成功后会自动切换资源。"
+)
+SWITCH_CONFIRMATION_EN = (
+    "A successful resource switch will interrupt your other active sessions. "
+    "Please confirm whether to proceed with the resource switch. If resources "
+    "are currently insufficient, the request will be queued first, and "
+    "resources will switch automatically once queuing succeeds."
+)
+
+
+def _confirmation_message(*, user_language: str, provisioning: bool) -> str:
+    chinese = user_language.strip().lower().startswith("zh")
+    if provisioning:
+        return QUEUE_CONFIRMATION_ZH if chinese else QUEUE_CONFIRMATION_EN
+    return SWITCH_CONFIRMATION_ZH if chinese else SWITCH_CONFIRMATION_EN
 
 
 def settings() -> Settings:
@@ -59,6 +95,7 @@ async def ensure_resource(
     cpu: int,
     memory_gib: int,
     gpu_count: int,
+    ctx: Context,
     pending_message: str = "",
     reason: str | None = None,
     gpu_type: str | None = None,
@@ -68,15 +105,19 @@ async def ensure_resource(
     working_directory: str | None = None,
     attachment_refs: list[Any] | None = None,
     session_id: str = "",
+    user_language: str = "zh-CN",
 ) -> dict[str, Any]:
     """Submit an idempotent Portal resource request with resumable task context.
 
     project_id is read from PORTAL_PROJECT_ID and is not a tool argument. Do not
     supply session_id yourself. The plugin's PreToolUse hook injects the current
     Claude Code session ID and missing trusted context fails validation closed.
+    The server checks the current provisioning state on every call and uses MCP
+    elicitation to obtain trusted user confirmation before any Portal POST.
     ENABLE_HANDOFF defaults to false; when false, pending_message may be omitted
     and the server sends pendingRequest.message as an empty string. When true,
-    pending_message must be non-empty.
+    pending_message must be non-empty. Pass user_language as a BCP 47-style
+    language tag; Chinese tags use Chinese prompts and other tags use English.
 
     Use gpu_type='Z1120' for V100 or 'V5000' for V5000. On a network timeout,
     call again with exactly the same request ID and pending request content.
@@ -110,7 +151,30 @@ async def ensure_resource(
             attachmentRefs=attachment_refs or [],
         ),
     )
-    result = await portal_client().ensure_resource(request)
+    client = portal_client()
+    current_status = await client.get_current_provisioning()
+    provisioning = current_status.get("provisioning") is True
+    confirmation = await ctx.elicit(
+        message=_confirmation_message(
+            user_language=user_language,
+            provisioning=provisioning,
+        ),
+        schema=ResourceSwitchConfirmation,
+    )
+    confirmed = (
+        confirmation.action == "accept"
+        and confirmation.data.confirm is True
+    )
+    if not confirmed:
+        return {
+            "submitted": False,
+            "confirmationAction": confirmation.action,
+            "provisioning": provisioning,
+            "activeRequestId": current_status.get("requestId"),
+            "traceId": current_status.get("traceId"),
+        }
+
+    result = await client.ensure_resource(request)
     result["submittedRequestId"] = request_id
     result["requestIdMatches"] = result.get("requestId") == request_id
     return result
