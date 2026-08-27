@@ -28,7 +28,8 @@ Physical NVIDIA V100 hardware is represented by Portal as `gpuType: "Z1120"`.
 Z1120 requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`.
 V5000 training hardware is represented as `gpuType: "V5000"`; each GPU has
-96 GiB VRAM and requests must use a supported fixed GPU/CPU/RAM tuple.
+96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
+`(1,16,112)`, `(2,32,225)`, or `(4,64,450)` and must never exceed 4 cards.
 
 ## Files
 

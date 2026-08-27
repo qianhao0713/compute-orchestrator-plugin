@@ -28,7 +28,7 @@ def test_v100_display_name_is_rejected_as_backend_enum():
 
 @pytest.mark.parametrize(
     ("gpu_count", "cpu", "memory_gib"),
-    [(1, 16, 112), (2, 32, 225), (4, 64, 450), (8, 128, 900)],
+    [(1, 16, 112), (2, 32, 225), (4, 64, 450)],
 )
 def test_v5000_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
     resource = ResourceSpec(
@@ -39,6 +39,19 @@ def test_v5000_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
         gpuCount=gpu_count,
     )
     assert resource.gpu_type == "V5000"
+
+
+def test_v5000_rejects_eight_gpus():
+    with pytest.raises(
+        ValidationError, match="V5000 GPU count must be one of 1, 2, 4"
+    ):
+        ResourceSpec(
+            resourceType="GPU",
+            cpu=128,
+            memoryGiB=900,
+            gpuType="V5000",
+            gpuCount=8,
+        )
 
 
 def test_v5000_rejects_non_fixed_spec():

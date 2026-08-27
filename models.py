@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 GPU_BACKEND_TYPES = {"Z1120", "V5000"}
-GPU_COUNTS = {1, 2, 4, 8}
 Z1120_SPECS = {
     1: (8, 64),
     2: (16, 128),
@@ -17,7 +16,6 @@ V5000_SPECS = {
     1: (16, 112),
     2: (32, 225),
     4: (64, 450),
-    8: (128, 900),
 }
 FORBIDDEN_KEYS = {
     "authorization",
@@ -62,11 +60,14 @@ class ResourceSpec(BaseModel):
         else:
             if self.gpu_type not in GPU_BACKEND_TYPES:
                 raise ValueError("gpuType must be 'Z1120' or 'V5000'")
-            if self.gpu_count not in GPU_COUNTS:
-                raise ValueError("GPU count must be one of 1, 2, 4, or 8")
             fixed_specs = (
                 Z1120_SPECS if self.gpu_type == "Z1120" else V5000_SPECS
             )
+            if self.gpu_count not in fixed_specs:
+                allowed_counts = ", ".join(str(count) for count in fixed_specs)
+                raise ValueError(
+                    f"{self.gpu_type} GPU count must be one of {allowed_counts}"
+                )
             expected_cpu, expected_memory = fixed_specs[self.gpu_count]
             if (self.cpu, self.memory_gib) != (expected_cpu, expected_memory):
                 raise ValueError(

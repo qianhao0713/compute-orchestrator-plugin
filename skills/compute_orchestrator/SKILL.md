@@ -45,7 +45,8 @@ Portal can provide:
 - Z1120 GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
 - V5000 domestic-accelerator training environments with 96 GiB VRAM per card,
   represented by `gpuType: "V5000"`;
-- GPU counts of 1, 2, 4, or 8;
+- Z1120 GPU counts of 1, 2, 4, or 8;
+- V5000 GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
 Never invent an unsupported GPU model or GPU count.
@@ -327,7 +328,8 @@ Produce an internal resource plan containing:
 - CPU cores;
 - RAM in GiB;
 - GPU hardware/type: Z1120 or, for supported training, V5000;
-- GPU count: one of `1`, `2`, `4`, or `8`;
+- GPU count: for Z1120 one of `1`, `2`, `4`, or `8`; for V5000 one of
+  `1`, `2`, or `4`;
 - worker count;
 - confidence level;
 - assumptions;
@@ -335,8 +337,8 @@ Produce an internal resource plan containing:
 
 For supported model training, also assess V5000 and choose the smallest fixed
 V5000 tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
-`(4,64,450)`, or `(8,128,900)`. Each GPU has 96 GiB VRAM. Do not submit a
-non-matching V5000 tuple.
+or `(4,64,450)`. Each GPU has 96 GiB VRAM. Never request more than 4
+V5000 cards, and do not submit a non-matching V5000 tuple.
 
 For Z1120 choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`. Do not submit a
@@ -927,12 +929,14 @@ Before calling `ensure_resource`, validate:
 - `memoryGiB >= 1`;
 - CPU requests use `gpuCount == 0` and `gpuType == null`;
 - GPU requests use `gpuCount > 0` and `gpuType` equal to `Z1120` or `V5000`;
-- GPU count is one of `1`, `2`, `4`, or `8`;
+- Z1120 GPU count is one of `1`, `2`, `4`, or `8`;
+- V5000 GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
 - the server sends its configured `projectId` only in the documented top-level
   field;
-- V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
+- V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
+  never request more than 4 cards;
 - Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
 - when `provisioning == false`, `AskUserQuestion` used the language-matched
