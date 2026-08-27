@@ -9,12 +9,10 @@ resumes the task in the new Claude Code runtime.
 1. Understand the task and inspect/generate executable code.
 2. Estimate CPU, RAM, GPU, VRAM, and topology requirements.
 3. Compare requirements with Portal `currentResource` and local effective limits.
-4. When a switch is required, finish CPU-suitable preparation first:
+4. When a switch is required and confirmed, finish CPU-suitable preparation first:
    download models/data, clone repositories, and verify persistent artifacts.
    Prepare a continuation message only when `ENABLE_HANDOFF=true`.
-5. Call `ensure_resource` once. It checks current Portal provisioning state and uses
-   MCP elicitation to obtain the status-specific user confirmation before any
-   Portal `ensure` POST.
+5. Call Portal `ensure` with `pendingRequest`.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
 7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
    when required, smoke-tests, and executes the core computation. V5000 training uses
@@ -30,8 +28,7 @@ Physical NVIDIA V100 hardware is represented by Portal as `gpuType: "Z1120"`.
 Z1120 requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`.
 V5000 training hardware is represented as `gpuType: "V5000"`; each GPU has
-96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
-`(1,16,112)`, `(2,32,225)`, or `(4,64,450)` and must never exceed 4 cards.
+96 GiB VRAM and requests must use a supported fixed GPU/CPU/RAM tuple.
 
 ## Files
 
@@ -58,11 +55,8 @@ users can see status and the old runtime can stop safely during migration.
 
 Before choosing a GPU target, callers query the available-cluster tool and avoid
 clusters absent from its result. Portal creates a new Runtime session after a
-resource switch. The ensure request carries the current Claude Code `sessionId`, injected from
-trusted `PreToolUse` hook context; callers must not generate it. Every
-`ensure_resource` call checks current provisioning state and performs MCP
-elicitation. Decline, cancellation, a false confirmation, or elicitation failure
-prevents the Portal POST.
+resource switch. The ensure request carries the current Claude Code `sessionId`,
+injected from trusted `PreToolUse` hook context; callers must not generate it.
 
 The plugin's `UserPromptSubmit` hook adds a resource-classification rule to every
 task. Explicit GPU and supported model-training prompts receive a stronger

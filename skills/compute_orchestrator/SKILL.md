@@ -45,8 +45,7 @@ Portal can provide:
 - Z1120 GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
 - V5000 domestic-accelerator training environments with 96 GiB VRAM per card,
   represented by `gpuType: "V5000"`;
-- Z1120 GPU counts of 1, 2, 4, or 8;
-- V5000 GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
+- GPU counts of 1, 2, 4, or 8;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
 Never invent an unsupported GPU model or GPU count.
@@ -137,12 +136,9 @@ Inputs:
 - `resource.gpuType`
 - `resource.gpuCount`
 - `resource.workerNum`
-- `user_language` (BCP 47-style tag used to select the elicitation language)
 
-The MCP server, not the model, owns HTTP authentication, Portal base URL
-configuration, the final provisioning-state check, and user confirmation through
-MCP elicitation. `ensure_resource` performs no Portal POST unless the elicitation
-is explicitly accepted and its `confirm` field is true.
+The MCP server, not the model, should own HTTP authentication and Portal base URL
+configuration.
 
 `get_resource_status` also returns the server-side `handoffEnabled` flag. When it
 is `false` (the default), do not prepare continuation text:
@@ -195,10 +191,9 @@ It should report:
     after a terminal failure.
 12. Query available clusters before expansion and exclude unavailable GPU types.
 13. Do not submit repeated requests merely to accelerate a queue.
-14. Let `ensure_resource` query the latest provisioning state and enforce MCP
-    elicitation on every call. When `provisioning == true`, let it submit only
-    after the user confirms that the existing queued task will be canceled and
-    the new task will queue from the beginning.
+14. When `provisioning == true`, submit a new resource request only after the
+    user confirms that doing so cancels the existing queued task and queues the
+    new task from the beginning.
 15. Do not start a destructive, expensive, or long-running job until the code,
     inputs, outputs, and resource plan have been checked.
 16. Ask the user only when a decision materially changes cost, resource
@@ -212,11 +207,18 @@ It should report:
 19. Complete all safe CPU-suitable preparation before provisioning. Use the
     target machine for environment installation, hardware validation, and the
     core compute workload, not for avoidable downloads or preparation.
-20. Do not use `AskUserQuestion` as the final resource-switch gate and do not
-    call `get_resource_status` solely as an immediate precondition to
-    `ensure_resource`. Pass the user's language to `ensure_resource` and let its
-    server-side MCP elicitation select the status-specific prompt, collect the
-    decision, and submit only after explicit confirmation.
+20. Immediately before every new resource-switch request when
+    `provisioning == false`, use
+    `AskUserQuestion` in the language the user is currently using. Explicitly
+    warn that a successful resource switch will interrupt the user's other active
+    sessions, ask whether to proceed, and explain that insufficient resources
+    cause the request to queue before switching automatically after the queue
+    succeeds. For example, ask Chinese users
+    `成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。`
+    and English users
+    `A successful resource switch will interrupt your other active sessions. Please confirm whether to proceed with the resource switch. If resources are currently insufficient, the request will be queued first, and resources will switch automatically once queuing succeeds.` Submit the request only
+    after an explicit affirmative answer for the current target specification.
+    Earlier general consent does not satisfy this final confirmation gate.
 
 21. When deriving a training script from an official template, remove or scope
     down any blanket process-killing commands. Specifically, replace
@@ -325,8 +327,7 @@ Produce an internal resource plan containing:
 - CPU cores;
 - RAM in GiB;
 - GPU hardware/type: Z1120 or, for supported training, V5000;
-- GPU count: for Z1120 one of `1`, `2`, `4`, or `8`; for V5000 one of
-  `1`, `2`, or `4`;
+- GPU count: one of `1`, `2`, `4`, or `8`;
 - worker count;
 - confidence level;
 - assumptions;
@@ -334,8 +335,8 @@ Produce an internal resource plan containing:
 
 For supported model training, also assess V5000 and choose the smallest fixed
 V5000 tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
-or `(4,64,450)`. Each GPU has 96 GiB VRAM. Never request more than 4
-V5000 cards, and do not submit a non-matching V5000 tuple.
+`(4,64,450)`, or `(8,128,900)`. Each GPU has 96 GiB VRAM. Do not submit a
+non-matching V5000 tuple.
 
 For Z1120 choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`. Do not submit a
@@ -545,24 +546,34 @@ estimate required resources
 → if sufficient: execute normally in the current container
 → if insufficient: finish only resource-independent data/model/repository preparation
 → persist and verify all artifacts and dependency requirements
-→ call ensure_resource once with the user language; it checks current Portal state
-→ MCP elicitation shows the matching confirmation and submits only on acceptance
+→ use the confirmation prompt that matches the latest provisioning state
+→ only after explicit confirmation, submit Portal resource request
 → install dependencies in the new container and execute subsequent steps
 ```
 
 ### Phase 8: Request resources when insufficient
 
-Call `get_available_clusters` immediately before `ensure_resource`. For GPU
+Call `get_available_clusters` immediately before the status/ensure flow. For GPU
 work, filter candidate cluster types by its result. If the preferred type is
 absent, use another enabled compatible cluster only when it can preserve the
 task's meaning and execution contract; otherwise stop and report that no
 compatible cluster is enabled. Never silently move V5000 fixed-code training to
 Z1120 or run arbitrary code on V5000.
 
-#### 8.1 Submit through server-enforced elicitation
+#### 8.1 Query current Portal operation
 
-Do not call `get_resource_status` solely to decide which confirmation to show
-immediately before submission. Instead:
+Call `get_resource_status`.
+
+First check the envelope:
+
+- if `code != "00000"`, stop and report `msg` and `traceId`;
+- otherwise inspect `data`.
+
+Use `data.provisioning` as authoritative.
+
+#### 8.2 No operation in progress
+
+When `provisioning == false`:
 
 1. confirm that all CPU-suitable pre-switch preparation has completed;
 2. verify that model, dataset, repository, and configuration artifacts are
@@ -571,30 +582,30 @@ immediately before submission. Instead:
 3. generate a stable UUID-based `requestId`;
 4. rely on the MCP server's environment-resolved project ID;
 5. when `handoffEnabled == true`, construct a self-contained
-   `pendingRequest.message` from persisted state; otherwise omit the message and
-   let the server send an empty string;
+   `pendingRequest.message` from persisted state; otherwise do not prepare the
+   message and let the server send it as an empty string;
 6. build the smallest sufficient supported resource specification;
-7. write a concise `reason` and pass `user_language` for the user's current
-   language;
-8. call `ensure_resource` once. Do not call `AskUserQuestion` first;
-9. let `ensure_resource` validate the request and query the latest Portal
-   provisioning state on every invocation;
-10. when `provisioning == false`, let MCP elicitation show the language-matched
-    normal switch warning;
-11. when `provisioning == true`, do not compare target specifications. Let MCP
-    elicitation show the fixed queue-cancellation warning;
-12. let the server POST only when elicitation returns `action == "accept"` and
-    `confirm == true`. On decline, cancel, false confirmation, unsupported
-    elicitation, or interaction failure, perform no Portal POST;
-13. after submission, compare the returned request ID with the submitted value
-    and inspect `operationType` and `resourceChanged`;
-14. if a switch or update is active, stop execution in the old runtime and poll;
+7. write a concise `reason` tied to the task and estimate;
+8. use `AskUserQuestion` in the language the user is currently using; state
+   that a successful resource switch will interrupt the user's other active
+   sessions, ask whether to proceed, and explain that insufficient resources
+   cause the request to queue before switching automatically after the queue
+   succeeds;
+9. submit nothing unless the user explicitly confirms this target specification;
+   if the user declines or does not answer affirmatively, stop without calling
+   `ensure_resource`;
+10. call `ensure_resource` immediately after confirmation, without doing more
+    work in the old container;
+11. verify `code == "00000"`;
+12. compare returned `data.requestId` with the submitted value;
+13. inspect `operationType` and `resourceChanged`;
+14. if a switch/update is active, stop execution in the old runtime and poll;
 15. if Portal returns `NO_CHANGE`, continue the task once in the current runtime.
 
-MCP elicitation remains inside the original `ensure_resource` call; do not make a
-second tool call after confirmation. Once submission succeeds, assume the current
-container may be reclaimed at any moment and perform no further preparation or
-workload execution in it.
+The confirmation is valid only for the resource specification shown to the
+user. Ask again if that specification changes. Once `ensure_resource` succeeds,
+assume the current container may be reclaimed at any moment and perform no
+further preparation or workload execution in it.
 
 CPU request:
 
@@ -715,21 +726,26 @@ logs needed for continuation, and a concise progress record there.
 The `pendingRequest` is a continuation envelope, not a place for authentication
 or hidden secrets.
 
-#### 8.4 Server-side elicitation prompts
+#### 8.4 Operation already in progress
 
-When the server observes `provisioning == true`, do not compare resource
-specifications. Use exactly this Chinese elicitation message for Chinese language
-tags:
+When `provisioning == true`, do not compare `targetResource` with the newly
+required resource and do not attempt to detect an equivalent request. Always
+treat the active operation as a different target operation:
 
-`当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，新任务重新排队，是否确认提交?`
-
-Use exactly this English message for other language tags:
-
-`A task is currently waiting in the queue. Submitting a new queued task will cancel the existing queued task, and the new task will re-enter the queue from the beginning. Do you confirm submission?`
-
-When the server observes `provisioning == false`, use the normal language-matched
-resource-switch message defined by the server. Treat decline, cancel, or a false
-confirmation as a safe no-op and return `submitted == false`.
+1. use `AskUserQuestion` immediately before submitting the new request;
+2. for Chinese users, use exactly
+   `当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，新任务重新排队，是否确认提交?`;
+3. for English users, use exactly
+   `A task is currently waiting in the queue. Submitting a new queued task will cancel the existing queued task, and the new task will re-enter the queue from the beginning. Do you confirm submission?`;
+4. for users of another language, ask the semantically equivalent question in
+   that language;
+5. treat this question as the final confirmation for the exact new resource
+   specification; do not show the normal `provisioning == false` switch prompt
+   as an additional confirmation;
+6. if the user explicitly confirms, call `ensure_resource` immediately. The
+   existing queued task is canceled and the new task queues from the beginning;
+7. otherwise, do not call `ensure_resource` and continue polling the existing
+   operation only if the user asks to keep waiting.
 
 ### Phase 9: Poll Portal state and handoff
 
@@ -911,20 +927,20 @@ Before calling `ensure_resource`, validate:
 - `memoryGiB >= 1`;
 - CPU requests use `gpuCount == 0` and `gpuType == null`;
 - GPU requests use `gpuCount > 0` and `gpuType` equal to `Z1120` or `V5000`;
-- Z1120 GPU count is one of `1`, `2`, `4`, or `8`;
-- V5000 GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
+- GPU count is one of `1`, `2`, `4`, or `8`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
 - the server sends its configured `projectId` only in the documented top-level
   field;
-- V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
-  never request more than 4 cards;
+- V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
-- `user_language` identifies the user's current language;
-- `ensure_resource` queried current Portal status and MCP elicitation returned
-  `action == "accept"` with `confirm == true` before the server sent a Portal
-  POST.
+- when `provisioning == false`, `AskUserQuestion` used the language-matched
+  resource-switch warning and received an explicit affirmative answer for this
+  exact target specification immediately before the request;
+- when `provisioning == true`, `AskUserQuestion` used the fixed
+  queue-cancellation warning in the user's language and received an explicit
+  affirmative answer immediately before the new request.
 
 ## Compact decision algorithm
 
@@ -940,15 +956,19 @@ understand task
      GET available clusters and filter GPU candidates
      complete CPU-suitable model/data/repository preparation
      persist and verify reusable artifacts
-     verify persisted preparation
-     if handoffEnabled: build self-contained pendingRequest.message
-     otherwise: leave pendingRequest.message empty
-     call ensure_resource once with user_language
-       → server validates input and GETs current provisioning state
-       → provisioning=false: MCP elicits the normal switch confirmation
-       → provisioning=true: MCP elicits the fixed queue-cancellation confirmation without comparing specifications
-       → accept + confirm=true: server POSTs the request
-       → decline, cancel, false, unsupported, or failure: server performs no POST
+     GET current provisioning state and read handoffEnabled
+     → if no active operation:
+          verify persisted preparation
+          if handoffEnabled: build self-contained pendingRequest.message
+          otherwise: leave pendingRequest.message empty
+          AskUserQuestion in the user's language: warn that a successful switch interrupts other active sessions, ask whether to proceed, and explain that insufficient resources queue first and switch automatically once queuing succeeds
+          → affirmative: immediately POST smallest sufficient supported specification plus project/message context
+          → otherwise: stop without POST
+       else:
+          treat provisioning=true as a different target without comparing specifications
+          AskUserQuestion with the fixed queue-cancellation warning in the user's language
+          → affirmative: immediately POST the new request; the old queued task is canceled and the new task queues from the beginning
+          → otherwise: do not POST; poll the existing operation only if the user asks to keep waiting
      → poll until provisioning=false
      → if successful and machine switched:
           if handoffEnabled: Portal submits pendingRequest in the new Runtime
