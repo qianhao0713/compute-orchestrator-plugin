@@ -1,7 +1,7 @@
 # Compute Orchestrator Claude Code Plugin
 
 This plugin evaluates scientific workloads, prepares reusable data dependencies
-in the current CPU container, requests CPU, gpu-32G, or gpu-96G resources through Portal, and
+in the current CPU container, requests CPU, gpu-32G, or GPU-96G resources through Portal, and
 resumes the task in the new Claude Code runtime.
 
 ## Core lifecycle
@@ -15,27 +15,27 @@ resumes the task in the new Claude Code runtime.
 5. Call Portal `ensure` with `pendingRequest`.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
 7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
-   when required, smoke-tests, and executes the core computation. gpu-96G training uses
+   when required, smoke-tests, and executes the core computation. GPU-96G training uses
    its fixed preinstalled environment and an existing training script under the
-   `nhmegatron` repository's `zj_examples/gpu-96G` path. If no local checkout
+   `nhmegatron` repository's `zj_examples/GPU-96G` path. If no local checkout
    exists, the agent first uses the plugin-bundled official example snapshot;
    remote GitLab access is only a fallback. Missing exact variants may be minimally derived from the closest
-   same-family official example after a per-GPU VRAM budget; from-scratch gpu-96G
+   same-family official example after a per-GPU VRAM budget; from-scratch GPU-96G
    training logic and launchers remain forbidden.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 Physical NVIDIA gpu-32G hardware is represented by Portal as `gpuType: "gpu-32G"`.
 gpu-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`.
-gpu-96G training hardware is represented as `gpuType: "gpu-96G"`; each GPU has
+GPU-96G training hardware is represented as `gpuType: "GPU-96G"`; each GPU has
 96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
 `(1,16,112)`, `(2,32,225)`, or `(4,64,450)` and must never exceed 4 cards.
 
 ## Files
 
 - `skills/compute_orchestrator/SKILL.md`: orchestration policy.
-- `skills/compute_orchestrator/references/nhmegatron/zj_examples/gpu-96G`: bundled
-  official gpu-96G example scripts for offline template selection.
+- `skills/compute_orchestrator/references/nhmegatron/zj_examples/GPU-96G`: bundled
+  official GPU-96G example scripts for offline template selection.
 - `server.py`: MCP tool definitions.
 - `portal_client.py`: authenticated Portal API client.
 - `models.py`: request validation and secret rejection.

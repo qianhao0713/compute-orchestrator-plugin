@@ -22,14 +22,14 @@ def test_explicit_cluster_name_is_detected():
 
 
 def test_gpu_96g_context_requires_official_template_and_vram_budget():
-    result = build_hook_output({"prompt": "用gpu-96G执行训练"})
+    result = build_hook_output({"prompt": "用GPU-96G执行训练"})
     context = result["hookSpecificOutput"]["additionalContext"]
     assert "gitlab.zhejianglab.com/nh-megatron/nhmegatron" in context
     assert "plugin-local snapshot" in context
     assert "before making any web request" in context
     assert "cloning is optional" in context
     assert "relative to the nhmegatron repository root" in context
-    assert "Never implement gpu-96G training logic or launchers from scratch" in context
+    assert "Never implement GPU-96G training logic or launchers from scratch" in context
     assert "same-family, same-architecture" in context
     assert "96 GiB" in context
 

@@ -4,7 +4,7 @@ description: >
   Mandatory resource planning and provisioning for every GPU-related task and
   other compute-intensive workloads. Always use whenever a request mentions or
   requires GPU, CUDA, NVIDIA, VRAM, GPU inference, GPU training, multi-GPU,
-  torchrun, NCCL, gpu-32G, or gpu-96G, even for a small command or smoke test. Also
+  torchrun, NCCL, gpu-32G, or GPU-96G, even for a small command or smoke test. Also
   always use before executing model training or fine-tuning, including Qwen,
   Qwen2, Qwen2.5, Qwen3, Qwen3-VL, Llama, DeepSeek, SFT, LoRA, pretraining,
   continued pretraining, preference training, distributed training, Megatron,
@@ -43,31 +43,31 @@ Portal can provide:
 
 - CPU-only environments with 1–32 CPU cores;
 - gpu-32G GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
-- gpu-96G domestic-accelerator training environments with 96 GiB VRAM per card,
-  represented by `gpuType: "gpu-96G"`;
+- GPU-96G domestic-accelerator training environments with 96 GiB VRAM per card,
+  represented by `gpuType: "GPU-96G"`;
 - gpu-32G GPU counts of 1, 2, 4, or 8;
-- gpu-96G GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
+- GPU-96G GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
 Never invent an unsupported GPU model or GPU count.
 
-Use the Portal GPU type names `gpu-32G` and `gpu-96G` consistently. Do not use
+Use the Portal GPU type names `gpu-32G` and `GPU-96G` consistently. Do not use
 hardware aliases for gpu-32G.
 
 Use only these exact gpu-32G `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
 `(2,16,128)`, `(4,32,256)`, and `(8,64,512)`.
 
-Use gpu-96G only for training supported Qwen, Llama, and DeepSeek models. gpu-96G
+Use GPU-96G only for training supported Qwen, Llama, and DeepSeek models. GPU-96G
 is a domestic accelerator cluster, and `nhmegatron` is its domestic-accelerator
 training framework. Its environment, repository, conversion tools, examples,
 and launch scripts are fixed. Do not write training code or launchers from scratch. A derived launcher
-is allowed only by copying the closest official gpu-96G example and making minimal,
+is allowed only by copying the closest official GPU-96G example and making minimal,
 reviewable model/hyperparameter changes after a VRAM estimate. Read
-[references/gpu-96g-training.md](references/gpu-96g-training.md) and search the local
-snapshot at `references/nhmegatron/zj_examples/gpu-96G` before planning or
-continuing a gpu-96G task. After switching to gpu-96G, use `xpu-smi`, not
+[references/GPU-96G-training.md](references/GPU-96G-training.md) and search the local
+snapshot at `references/nhmegatron/zj_examples/GPU-96G` before planning or
+continuing a GPU-96G task. After switching to GPU-96G, use `xpu-smi`, not
 `nvidia-smi`, to detect and count accelerator cards. Do not interpret a missing
-or empty `nvidia-smi` result as evidence that gpu-96G cards are unavailable. Do
+or empty `nvidia-smi` result as evidence that GPU-96G cards are unavailable. Do
 not fetch the same examples from the web when the local snapshot contains the
 required template.
 
@@ -81,8 +81,8 @@ multiple workers or multiple nodes.
 
 Call `GET /scientist/deployment/clusters/available` after deciding CPU versus
 GPU and before every resource expansion. Treat returned identifiers
-case-insensitively. Never select gpu-32G when `gpu-32G` is absent or gpu-96G when
-`gpu-96G` is absent. An included identifier means enabled, not guaranteed idle
+case-insensitively. Never select gpu-32G when `gpu-32G` is absent or GPU-96G when
+`GPU-96G` is absent. An included identifier means enabled, not guaranteed idle
 capacity; provisioning may still queue. An empty list means no internal GPU
 cluster may be selected, but it does not prohibit a CPU-only K8s expansion.
 
@@ -216,21 +216,27 @@ It should report:
     `ensure_resource`. Submit only after the user selects that contract's fixed
     confirmation option. Earlier general consent does not satisfy this gate.
 
-21. When deriving a training script from an official template, remove or scope
-    down any blanket process-killing commands. Specifically, replace
-    `pkill -9 python` with a targeted pattern that only matches training
-    processes (for example,
-    `pkill -9 -f "torchrun\|pretrain_v\|xmegatron_ext"`). Never copy
-    `pkill -9 python`, `killall python`, `fuser -k`, or similar broad-spectrum
-    kill commands into generated scripts, because they will kill the agent
-    infrastructure (`uvicorn`, `compute-orchestrator`) running in the same
+21. Before running any training script, whether an official template or a
+    derived script, inspect it for broad-spectrum process-killing commands such
+    as `pkill -9 python`, `killall python`, and `fuser -k`. If any are present,
+    never run or modify that script in place. Copy it to a derived script,
+    replace every broad-spectrum kill with a targeted pattern that matches only
+    training processes (for example,
+    `pkill -9 -f "torchrun\|pretrain_v\|xmegatron_ext"`), verify the derived
+    script contains no broad-spectrum kill, and run only the derived script.
+    Never copy or retain broad-spectrum kill commands: they can terminate the
+    agent infrastructure (`uvicorn`, `compute-orchestrator`) in the same
     container.
 
 22. In all Claude-facing plans, explanations, prompts, tool arguments, status
     summaries, and error reports, refer to GPU clusters only as `gpu-32G` or
-    `gpu-96G`. Treat backend identifiers and legacy directory components found
-    in Portal payloads or official templates as internal implementation details;
-    never repeat them to the user or use them as `ensure_resource.gpu_type`.
+    `GPU-96G`. Never disclose a GPU vendor, chip family, product name, device
+    name, or other specific hardware model. Treat such details, backend
+    identifiers, and legacy directory components from resource inspection,
+    Portal payloads, logs, errors, or official templates as internal
+    implementation details. Do not quote or repeat them to the user; normalize
+    the corresponding resource to `gpu-32G` or `GPU-96G`, and use only those
+    names as `ensure_resource.gpu_type`.
 
 ## End-to-end procedure
 
@@ -279,15 +285,15 @@ dependencies. Verify that the execution path places meaningful work on a GPU.
 
 ### Phase 3: Generate or inspect the code
 
-For a supported Qwen, Llama, or DeepSeek training task targeting gpu-96G, do not
+For a supported Qwen, Llama, or DeepSeek training task targeting GPU-96G, do not
 perform the generic environment/code generation steps below. Follow the fixed
 repository, model conversion tools, environment, example configuration, and
-launch script in [references/gpu-96g-training.md](references/gpu-96g-training.md).
+launch script in [references/GPU-96G-training.md](references/GPU-96G-training.md).
 Search the plugin-local snapshot at
-`references/nhmegatron/zj_examples/gpu-96G` first. It mirrors official examples
+`references/nhmegatron/zj_examples/GPU-96G` first. It mirrors official examples
 for analysis but is not a complete executable repository. Access the official
 GitLab only when the snapshot lacks a needed file or the user requests an
-upstream refresh. Select an exact official gpu-96G example when available.
+upstream refresh. Select an exact official GPU-96G example when available.
 Otherwise select the closest official example with the same model family and
 architecture, copy it as the sole template, and change only necessary model
 structure, parallelism, batch, sequence, precision, recomputation, and stable
@@ -328,18 +334,18 @@ Produce an internal resource plan containing:
 - `resourceType`: `CPU` or `GPU`;
 - CPU cores;
 - RAM in GiB;
-- GPU hardware/type: gpu-32G or, for supported training, gpu-96G;
-- GPU count: for gpu-32G one of `1`, `2`, `4`, or `8`; for gpu-96G one of
+- GPU hardware/type: gpu-32G or, for supported training, GPU-96G;
+- GPU count: for gpu-32G one of `1`, `2`, `4`, or `8`; for GPU-96G one of
   `1`, `2`, or `4`;
 - worker count;
 - confidence level;
 - assumptions;
 - headroom.
 
-For supported model training, also assess gpu-96G and choose the smallest fixed
-gpu-96G tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
+For supported model training, also assess GPU-96G and choose the smallest fixed
+GPU-96G tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
 or `(4,64,450)`. Each GPU has 96 GiB VRAM. Never request more than 4
-gpu-96G cards, and do not submit a non-matching gpu-96G tuple.
+GPU-96G cards, and do not submit a non-matching GPU-96G tuple.
 
 For gpu-32G choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`. Do not submit a
@@ -450,17 +456,17 @@ For gpu-32G, use NVIDIA tooling:
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
 ```
 
-For gpu-96G, use domestic-accelerator tooling:
+For GPU-96G, use domestic-accelerator tooling:
 
 ```bash
 xpu-smi
 ```
 
-Count gpu-96G cards from the devices reported by `xpu-smi`. Never use
-`nvidia-smi` to determine gpu-96G card count, and never fall back from
-`xpu-smi` to `nvidia-smi` on gpu-96G. Use the fixed gpu-96G environment and its
+Count GPU-96G cards from the devices reported by `xpu-smi`. Never use
+`nvidia-smi` to determine GPU-96G card count, and never fall back from
+`xpu-smi` to `nvidia-smi` on GPU-96G. Use the fixed GPU-96G environment and its
 framework-specific probe only as an additional check; do not require generic
-PyTorch CUDA discovery to identify gpu-96G cards.
+PyTorch CUDA discovery to identify GPU-96G cards.
 
 Normalize the current resources and the required resources into comparable
 values.
@@ -521,7 +527,7 @@ Dependency installation is not pre-switch preparation. Do not install or
 upgrade Python packages, system packages, CUDA libraries, framework
 dependencies, or create/modify the execution environment in the old container.
 Record all required dependencies in the handoff and install them only after the
-new container is active. For gpu-96G, continue to follow its fixed environment,
+new container is active. For GPU-96G, continue to follow its fixed environment,
 code, and script rules rather than creating a replacement environment.
 
 Do not perform preparation in the current container when it itself requires the
@@ -560,8 +566,8 @@ Call `get_available_clusters` immediately before the status/ensure flow. For GPU
 work, filter candidate cluster types by its result. If the preferred type is
 absent, use another enabled compatible cluster only when it can preserve the
 task's meaning and execution contract; otherwise stop and report that no
-compatible cluster is enabled. Never silently move gpu-96G fixed-code training to
-gpu-32G or run arbitrary code on gpu-96G.
+compatible cluster is enabled. Never silently move GPU-96G fixed-code training to
+gpu-32G or run arbitrary code on GPU-96G.
 
 #### Fixed `AskUserQuestion` contracts
 
@@ -692,8 +698,8 @@ GPU request:
 ```
 
 Do not include `projectId`, `sessionId`, or `clientMessageId` in caller-supplied
-MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For gpu-96G use
-`gpuType: "gpu-96G"` and one of its exact fixed tuples.
+MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For GPU-96G use
+`gpuType: "GPU-96G"` and one of its exact fixed tuples.
 
 #### 8.3 Construct a resumable `pendingRequest` only when enabled
 
@@ -723,11 +729,11 @@ The `pendingRequest.message` should contain:
 - expected outputs and success criteria;
 - instructions to inspect persisted state before repeating work.
 
-For gpu-96G, it must explicitly state that gpu-96G is a domestic accelerator
+For GPU-96G, it must explicitly state that GPU-96G is a domestic accelerator
 cluster, `nhmegatron` is its domestic-accelerator training framework, and the
 new runtime must use `xpu-smi` rather than `nvidia-smi` to enumerate and count
 cards. It must require comparing the `xpu-smi` count with the requested
-`gpuCount` before training. It must also state that `zj_examples/gpu-96G` is
+`gpuCount` before training. It must also state that `zj_examples/GPU-96G` is
 relative to the root
 of the canonical `nhmegatron` repository from
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/`, not relative to the
@@ -743,7 +749,7 @@ A suitable continuation prompt resembles:
 Continue the paper reproduction task in the configured Portal project.
 Work in <stable working directory>. The repository is at <path>.
 Completed: <brief persisted progress>.
-Next: inspect the persisted handoff record and verify the prepared model and data artifacts. gpu-96G is a domestic accelerator cluster, and nhmegatron is its domestic-accelerator training framework. On gpu-96G, run xpu-smi to enumerate and count cards, compare the result with the requested gpuCount, and never use or fall back to nvidia-smi for gpu-96G card discovery. For gpu-96G training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/gpu-96G as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official gpu-96G example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
+Next: inspect the persisted handoff record and verify the prepared model and data artifacts. GPU-96G is a domestic accelerator cluster, and nhmegatron is its domestic-accelerator training framework. On GPU-96G, run xpu-smi to enumerate and count cards, compare the result with the requested gpuCount, and never use or fall back to nvidia-smi for GPU-96G card discovery. For GPU-96G training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/GPU-96G as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official GPU-96G example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
 resource-related failure occurs, collect measurements and re-run the resource
 assessment workflow.
 ```
@@ -883,7 +889,7 @@ distinguish:
 - memory leak;
 - invalid tensor shape;
 - software bug;
-- unsupported gpu-32G or gpu-96G kernel/environment;
+- unsupported gpu-32G or GPU-96G kernel/environment;
 - wrong distributed launch;
 - data corruption;
 - storage exhaustion;
@@ -941,7 +947,7 @@ Before calling `ensure_resource`, validate:
 - when `handoffEnabled == false`, `pendingRequest.message == ""`;
 - when `handoffEnabled == true`, `pendingRequest.message` is non-empty and at
   most 200000 characters;
-- when handoff is enabled for gpu-96G, `pendingRequest.message` states that gpu-96G is a domestic
+- when handoff is enabled for GPU-96G, `pendingRequest.message` states that GPU-96G is a domestic
   accelerator cluster, `nhmegatron` is its domestic-accelerator framework, and
   card enumeration must use `xpu-smi`, not `nvidia-smi`;
 - `pendingRequest.parts` contains at most 100 items;
@@ -955,14 +961,14 @@ Before calling `ensure_resource`, validate:
 - `cpu >= 1`;
 - `memoryGiB >= 1`;
 - CPU requests use `gpuCount == 0` and `gpuType == null`;
-- GPU requests use `gpuCount > 0` and `gpuType` equal to `gpu-32G` or `gpu-96G`;
+- GPU requests use `gpuCount > 0` and `gpuType` equal to `gpu-32G` or `GPU-96G`;
 - gpu-32G GPU count is one of `1`, `2`, `4`, or `8`;
-- gpu-96G GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
+- GPU-96G GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
 - the server sends its configured `projectId` only in the documented top-level
   field;
-- gpu-96G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
+- GPU-96G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
   never request more than 4 cards;
 - gpu-32G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
@@ -1006,9 +1012,9 @@ understand task
      → if successful and machine switched:
           if handoffEnabled: Portal submits pendingRequest in the new Runtime
           otherwise: no automatic continuation prompt is expected
-          new Runtime re-inspects resources with `xpu-smi` on gpu-96G or `nvidia-smi` on gpu-32G
+          new Runtime re-inspects resources with `xpu-smi` on GPU-96G or `nvidia-smi` on gpu-32G
           verifies prepared artifacts
-          uses fixed gpu-96G environment or installs required target dependencies
+          uses fixed GPU-96G environment or installs required target dependencies
           smoke test
           executes core task exactly once
        else if NO_CHANGE:
