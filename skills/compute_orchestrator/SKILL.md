@@ -4,7 +4,7 @@ description: >
   Mandatory resource planning and provisioning for every GPU-related task and
   other compute-intensive workloads. Always use whenever a request mentions or
   requires GPU, CUDA, NVIDIA, VRAM, GPU inference, GPU training, multi-GPU,
-  torchrun, NCCL, Z1120, or V5000, even for a small command or smoke test. Also
+  torchrun, NCCL, gpu-32G, or gpu-96G, even for a small command or smoke test. Also
   always use before executing model training or fine-tuning, including Qwen,
   Qwen2, Qwen2.5, Qwen3, Qwen3-VL, Llama, DeepSeek, SFT, LoRA, pretraining,
   continued pretraining, preference training, distributed training, Megatron,
@@ -42,32 +42,32 @@ smallest supported configuration that is reasonably likely to complete the task.
 Portal can provide:
 
 - CPU-only environments with 1–32 CPU cores;
-- Z1120 GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
-- V5000 domestic-accelerator training environments with 96 GiB VRAM per card,
-  represented by `gpuType: "V5000"`;
-- Z1120 GPU counts of 1, 2, 4, or 8;
-- V5000 GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
+- gpu-32G GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
+- gpu-96G domestic-accelerator training environments with 96 GiB VRAM per card,
+  represented by `gpuType: "gpu-96G"`;
+- gpu-32G GPU counts of 1, 2, 4, or 8;
+- gpu-96G GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
 Never invent an unsupported GPU model or GPU count.
 
-Use the Portal GPU type names `Z1120` and `V5000` consistently. Do not use
-hardware aliases for Z1120.
+Use the Portal GPU type names `gpu-32G` and `gpu-96G` consistently. Do not use
+hardware aliases for gpu-32G.
 
-Use only these exact Z1120 `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
+Use only these exact gpu-32G `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
 `(2,16,128)`, `(4,32,256)`, and `(8,64,512)`.
 
-Use V5000 only for training supported Qwen, Llama, and DeepSeek models. V5000
+Use gpu-96G only for training supported Qwen, Llama, and DeepSeek models. gpu-96G
 is a domestic accelerator cluster, and `nhmegatron` is its domestic-accelerator
 training framework. Its environment, repository, conversion tools, examples,
 and launch scripts are fixed. Do not write training code or launchers from scratch. A derived launcher
-is allowed only by copying the closest official V5000 example and making minimal,
+is allowed only by copying the closest official gpu-96G example and making minimal,
 reviewable model/hyperparameter changes after a VRAM estimate. Read
-[references/v5000-training.md](references/v5000-training.md) and search the local
-snapshot at `references/nhmegatron/zj_examples/V5000` before planning or
-continuing a V5000 task. After switching to V5000, use `xpu-smi`, not
+[references/gpu-96g-training.md](references/gpu-96g-training.md) and search the local
+snapshot at `references/nhmegatron/zj_examples/gpu-96G` before planning or
+continuing a gpu-96G task. After switching to gpu-96G, use `xpu-smi`, not
 `nvidia-smi`, to detect and count accelerator cards. Do not interpret a missing
-or empty `nvidia-smi` result as evidence that V5000 cards are unavailable. Do
+or empty `nvidia-smi` result as evidence that gpu-96G cards are unavailable. Do
 not fetch the same examples from the web when the local snapshot contains the
 required template.
 
@@ -81,8 +81,8 @@ multiple workers or multiple nodes.
 
 Call `GET /scientist/deployment/clusters/available` after deciding CPU versus
 GPU and before every resource expansion. Treat returned identifiers
-case-insensitively. Never select Z1120 when `z1120` is absent or V5000 when
-`v5000` is absent. An included identifier means enabled, not guaranteed idle
+case-insensitively. Never select gpu-32G when `gpu-32G` is absent or gpu-96G when
+`gpu-96G` is absent. An included identifier means enabled, not guaranteed idle
 capacity; provisioning may still queue. An empty list means no internal GPU
 cluster may be selected, but it does not prohibit a CPU-only K8s expansion.
 
@@ -226,6 +226,12 @@ It should report:
     infrastructure (`uvicorn`, `compute-orchestrator`) running in the same
     container.
 
+22. In all Claude-facing plans, explanations, prompts, tool arguments, status
+    summaries, and error reports, refer to GPU clusters only as `gpu-32G` or
+    `gpu-96G`. Treat backend identifiers and legacy directory components found
+    in Portal payloads or official templates as internal implementation details;
+    never repeat them to the user or use them as `ensure_resource.gpu_type`.
+
 ## End-to-end procedure
 
 ### Phase 1: Understand the task
@@ -273,15 +279,15 @@ dependencies. Verify that the execution path places meaningful work on a GPU.
 
 ### Phase 3: Generate or inspect the code
 
-For a supported Qwen, Llama, or DeepSeek training task targeting V5000, do not
+For a supported Qwen, Llama, or DeepSeek training task targeting gpu-96G, do not
 perform the generic environment/code generation steps below. Follow the fixed
 repository, model conversion tools, environment, example configuration, and
-launch script in [references/v5000-training.md](references/v5000-training.md).
+launch script in [references/gpu-96g-training.md](references/gpu-96g-training.md).
 Search the plugin-local snapshot at
-`references/nhmegatron/zj_examples/V5000` first. It mirrors official examples
+`references/nhmegatron/zj_examples/gpu-96G` first. It mirrors official examples
 for analysis but is not a complete executable repository. Access the official
 GitLab only when the snapshot lacks a needed file or the user requests an
-upstream refresh. Select an exact official V5000 example when available.
+upstream refresh. Select an exact official gpu-96G example when available.
 Otherwise select the closest official example with the same model family and
 architecture, copy it as the sole template, and change only necessary model
 structure, parallelism, batch, sequence, precision, recomputation, and stable
@@ -322,22 +328,22 @@ Produce an internal resource plan containing:
 - `resourceType`: `CPU` or `GPU`;
 - CPU cores;
 - RAM in GiB;
-- GPU hardware/type: Z1120 or, for supported training, V5000;
-- GPU count: for Z1120 one of `1`, `2`, `4`, or `8`; for V5000 one of
+- GPU hardware/type: gpu-32G or, for supported training, gpu-96G;
+- GPU count: for gpu-32G one of `1`, `2`, `4`, or `8`; for gpu-96G one of
   `1`, `2`, or `4`;
 - worker count;
 - confidence level;
 - assumptions;
 - headroom.
 
-For supported model training, also assess V5000 and choose the smallest fixed
-V5000 tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
+For supported model training, also assess gpu-96G and choose the smallest fixed
+gpu-96G tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
 or `(4,64,450)`. Each GPU has 96 GiB VRAM. Never request more than 4
-V5000 cards, and do not submit a non-matching V5000 tuple.
+gpu-96G cards, and do not submit a non-matching gpu-96G tuple.
 
-For Z1120 choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
+For gpu-32G choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`. Do not submit a
-non-matching Z1120 tuple.
+non-matching gpu-32G tuple.
 
 #### CPU estimate
 
@@ -397,9 +403,9 @@ Do not decide GPU count by dividing estimated VRAM by per-GPU VRAM unless the
 code supports a suitable distribution strategy. Data parallelism duplicates the
 model on each GPU and does not solve model-fit OOM.
 
-#### Z1120 compatibility
+#### gpu-32G compatibility
 
-Before requesting Z1120, account for its 32 GiB VRAM per GPU and CUDA
+Before requesting gpu-32G, account for its 32 GiB VRAM per GPU and CUDA
 architecture `sm70`, then check:
 
 - required CUDA compute capability;
@@ -409,7 +415,7 @@ architecture `sm70`, then check:
 - custom CUDA extension architecture flags;
 - library versions that may require newer GPUs.
 
-Adapt code to supported Z1120 execution where possible without changing the
+Adapt code to supported gpu-32G execution where possible without changing the
 scientific target. Otherwise explain that the workload is incompatible with the
 available GPU fleet.
 
@@ -438,23 +444,23 @@ cat /sys/fs/cgroup/memory.max 2>/dev/null || true
 
 Then use the probe that matches `currentResource.gpuType`.
 
-For Z1120, use NVIDIA tooling:
+For gpu-32G, use NVIDIA tooling:
 
 ```bash
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
 ```
 
-For V5000, use domestic-accelerator tooling:
+For gpu-96G, use domestic-accelerator tooling:
 
 ```bash
 xpu-smi
 ```
 
-Count V5000 cards from the devices reported by `xpu-smi`. Never use
-`nvidia-smi` to determine V5000 card count, and never fall back from
-`xpu-smi` to `nvidia-smi` on V5000. Use the fixed V5000 environment and its
+Count gpu-96G cards from the devices reported by `xpu-smi`. Never use
+`nvidia-smi` to determine gpu-96G card count, and never fall back from
+`xpu-smi` to `nvidia-smi` on gpu-96G. Use the fixed gpu-96G environment and its
 framework-specific probe only as an additional check; do not require generic
-PyTorch CUDA discovery to identify V5000 cards.
+PyTorch CUDA discovery to identify gpu-96G cards.
 
 Normalize the current resources and the required resources into comparable
 values.
@@ -515,7 +521,7 @@ Dependency installation is not pre-switch preparation. Do not install or
 upgrade Python packages, system packages, CUDA libraries, framework
 dependencies, or create/modify the execution environment in the old container.
 Record all required dependencies in the handoff and install them only after the
-new container is active. For V5000, continue to follow its fixed environment,
+new container is active. For gpu-96G, continue to follow its fixed environment,
 code, and script rules rather than creating a replacement environment.
 
 Do not perform preparation in the current container when it itself requires the
@@ -554,8 +560,8 @@ Call `get_available_clusters` immediately before the status/ensure flow. For GPU
 work, filter candidate cluster types by its result. If the preferred type is
 absent, use another enabled compatible cluster only when it can preserve the
 task's meaning and execution contract; otherwise stop and report that no
-compatible cluster is enabled. Never silently move V5000 fixed-code training to
-Z1120 or run arbitrary code on V5000.
+compatible cluster is enabled. Never silently move gpu-96G fixed-code training to
+gpu-32G or run arbitrary code on gpu-96G.
 
 #### Fixed `AskUserQuestion` contracts
 
@@ -671,7 +677,7 @@ GPU request:
     "resourceType": "GPU",
     "cpu": 8,
     "memoryGiB": 64,
-    "gpuType": "Z1120",
+    "gpuType": "gpu-32G",
     "gpuCount": 1,
     "workerNum": 1
   },
@@ -686,8 +692,8 @@ GPU request:
 ```
 
 Do not include `projectId`, `sessionId`, or `clientMessageId` in caller-supplied
-MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For V5000 use
-`gpuType: "V5000"` and one of its exact fixed tuples.
+MCP arguments. The hook injects `sessionId`. Replace placeholder quantities with assessed values. For gpu-96G use
+`gpuType: "gpu-96G"` and one of its exact fixed tuples.
 
 #### 8.3 Construct a resumable `pendingRequest` only when enabled
 
@@ -717,11 +723,11 @@ The `pendingRequest.message` should contain:
 - expected outputs and success criteria;
 - instructions to inspect persisted state before repeating work.
 
-For V5000, it must explicitly state that V5000 is a domestic accelerator
+For gpu-96G, it must explicitly state that gpu-96G is a domestic accelerator
 cluster, `nhmegatron` is its domestic-accelerator training framework, and the
 new runtime must use `xpu-smi` rather than `nvidia-smi` to enumerate and count
 cards. It must require comparing the `xpu-smi` count with the requested
-`gpuCount` before training. It must also state that `zj_examples/V5000` is
+`gpuCount` before training. It must also state that `zj_examples/gpu-96G` is
 relative to the root
 of the canonical `nhmegatron` repository from
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/`, not relative to the
@@ -737,7 +743,7 @@ A suitable continuation prompt resembles:
 Continue the paper reproduction task in the configured Portal project.
 Work in <stable working directory>. The repository is at <path>.
 Completed: <brief persisted progress>.
-Next: inspect the persisted handoff record and verify the prepared model and data artifacts. V5000 is a domestic accelerator cluster, and nhmegatron is its domestic-accelerator training framework. On V5000, run xpu-smi to enumerate and count cards, compare the result with the requested gpuCount, and never use or fall back to nvidia-smi for V5000 card discovery. For V5000 training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/V5000 as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official V5000 example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
+Next: inspect the persisted handoff record and verify the prepared model and data artifacts. gpu-96G is a domestic accelerator cluster, and nhmegatron is its domestic-accelerator training framework. On gpu-96G, run xpu-smi to enumerate and count cards, compare the result with the requested gpuCount, and never use or fall back to nvidia-smi for gpu-96G card discovery. For gpu-96G training, locate the nhmegatron checkout or inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; cloning is optional. Treat zj_examples/gpu-96G as relative to that repository root. Use an exact official example when available; otherwise copy the closest same-family, same-architecture official gpu-96G example as the sole template and modify only required model/hyperparameter/path values. Record the source template and diff. Before running, calculate per-GPU VRAM for weights, gradients, optimizer/master states, activations, temporary workspaces, communication buffers, and framework overhead; keep headroom below 96 GiB per GPU, then run a bounded smoke test. Never implement training logic or a launcher from scratch. Stop if no compatible official template exists or the memory plan does not fit. Then run <command/configuration> and save logs and outputs under stable paths. If a
 resource-related failure occurs, collect measurements and re-run the resource
 assessment workflow.
 ```
@@ -877,7 +883,7 @@ distinguish:
 - memory leak;
 - invalid tensor shape;
 - software bug;
-- unsupported Z1120 or V5000 kernel/environment;
+- unsupported gpu-32G or gpu-96G kernel/environment;
 - wrong distributed launch;
 - data corruption;
 - storage exhaustion;
@@ -935,7 +941,7 @@ Before calling `ensure_resource`, validate:
 - when `handoffEnabled == false`, `pendingRequest.message == ""`;
 - when `handoffEnabled == true`, `pendingRequest.message` is non-empty and at
   most 200000 characters;
-- when handoff is enabled for V5000, `pendingRequest.message` states that V5000 is a domestic
+- when handoff is enabled for gpu-96G, `pendingRequest.message` states that gpu-96G is a domestic
   accelerator cluster, `nhmegatron` is its domestic-accelerator framework, and
   card enumeration must use `xpu-smi`, not `nvidia-smi`;
 - `pendingRequest.parts` contains at most 100 items;
@@ -949,16 +955,16 @@ Before calling `ensure_resource`, validate:
 - `cpu >= 1`;
 - `memoryGiB >= 1`;
 - CPU requests use `gpuCount == 0` and `gpuType == null`;
-- GPU requests use `gpuCount > 0` and `gpuType` equal to `Z1120` or `V5000`;
-- Z1120 GPU count is one of `1`, `2`, `4`, or `8`;
-- V5000 GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
+- GPU requests use `gpuCount > 0` and `gpuType` equal to `gpu-32G` or `gpu-96G`;
+- gpu-32G GPU count is one of `1`, `2`, `4`, or `8`;
+- gpu-96G GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
 - the server sends its configured `projectId` only in the documented top-level
   field;
-- V5000 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
+- gpu-96G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
   never request more than 4 cards;
-- Z1120 requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
+- gpu-32G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
 - the latest `get_resource_status` result contained a top-level boolean
   `provisioning`; no `data.provisioning` lookup was used;
@@ -1000,9 +1006,9 @@ understand task
      → if successful and machine switched:
           if handoffEnabled: Portal submits pendingRequest in the new Runtime
           otherwise: no automatic continuation prompt is expected
-          new Runtime re-inspects resources with `xpu-smi` on V5000 or `nvidia-smi` on Z1120
+          new Runtime re-inspects resources with `xpu-smi` on gpu-96G or `nvidia-smi` on gpu-32G
           verifies prepared artifacts
-          uses fixed V5000 environment or installs required target dependencies
+          uses fixed gpu-96G environment or installs required target dependencies
           smoke test
           executes core task exactly once
        else if NO_CHANGE:

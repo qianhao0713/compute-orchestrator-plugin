@@ -43,7 +43,7 @@ def test_v5000_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
 
 def test_v5000_rejects_eight_gpus():
     with pytest.raises(
-        ValidationError, match="V5000 GPU count must be one of 1, 2, 4"
+        ValidationError, match="gpu-96G GPU count must be one of 1, 2, 4"
     ):
         ResourceSpec(
             resourceType="GPU",

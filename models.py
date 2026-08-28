@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gpu_aliases import public_gpu_type
+
 
 GPU_BACKEND_TYPES = {"Z1120", "V5000"}
 Z1120_SPECS = {
@@ -59,19 +61,19 @@ class ResourceSpec(BaseModel):
             self.gpu_type = None
         else:
             if self.gpu_type not in GPU_BACKEND_TYPES:
-                raise ValueError("gpuType must be 'Z1120' or 'V5000'")
+                raise ValueError("gpuType must identify a supported GPU cluster")
             fixed_specs = (
                 Z1120_SPECS if self.gpu_type == "Z1120" else V5000_SPECS
             )
             if self.gpu_count not in fixed_specs:
                 allowed_counts = ", ".join(str(count) for count in fixed_specs)
                 raise ValueError(
-                    f"{self.gpu_type} GPU count must be one of {allowed_counts}"
+                    f"{public_gpu_type(self.gpu_type)} GPU count must be one of {allowed_counts}"
                 )
             expected_cpu, expected_memory = fixed_specs[self.gpu_count]
             if (self.cpu, self.memory_gib) != (expected_cpu, expected_memory):
                 raise ValueError(
-                    f"{self.gpu_type} requires the fixed "
+                    f"{public_gpu_type(self.gpu_type)} requires the fixed "
                     "(gpuCount, cpu, memoryGiB) specification "
                     f"({self.gpu_count}, {expected_cpu}, {expected_memory})"
                 )

@@ -1,55 +1,53 @@
-# V5000 model training
+# gpu-96G model training
 
 Use this path only for training supported Qwen, Llama, and DeepSeek families.
-V5000 is a domestic accelerator cluster, and `nhmegatron` is its
-domestic-accelerator training framework. V5000 has 96 GiB VRAM per card and accepts only these exact Portal tuples:
+gpu-96G is a domestic accelerator cluster, and `nhmegatron` is its
+domestic-accelerator training framework. gpu-96G has 96 GiB VRAM per card and accepts only these exact Portal tuples:
 
 | GPUs | CPU | RAM GiB |
 | ---: | ---: | ---: |
 | 1 | 16 | 112 |
 | 2 | 32 | 225 |
 | 4 | 64 | 450 |
-| 8 | 128 | 900 |
 
-Send `resourceType: GPU`, `gpuType: V5000`, and `workerNum: 1`. Select the
+Send `resourceType: GPU`, `gpuType: gpu-96G`, and `workerNum: 1`. Select the
 smallest tuple that supports the documented example and parallel strategy.
 
-After migration to V5000, run `xpu-smi` to enumerate and count accelerator
-cards. Do not use `nvidia-smi` for V5000 card discovery, do not fall back to it,
+After migration to gpu-96G, run `xpu-smi` to enumerate and count accelerator
+cards. Do not use `nvidia-smi` for gpu-96G card discovery, do not fall back to it,
 and do not treat its failure or empty output as a missing-card condition. Compare
 the `xpu-smi` device count with the requested Portal `gpuCount` before training.
 
 ## Local official-example snapshot
 
-Search `references/nhmegatron/zj_examples/V5000` relative to this Skill before
-accessing GitLab. It contains the official V5000 text scripts and configurations
+Search `references/nhmegatron/zj_examples/gpu-96G` relative to this Skill before
+accessing GitLab. It contains the official gpu-96G text scripts and configurations
 from `main` commit `49ebf44cee9fe35eff7cbf7937066dc0ee0e22d6`; see
 `references/nhmegatron/SNAPSHOT.md` for provenance. Use it for template selection,
 comparison, derivation, and resource estimation without repeated web requests.
 
 The snapshot is not a complete training repository. Commands in its scripts may
 refer to modules, binaries, data, or tokenizer assets that exist only in the
-V5000 runtime or full upstream checkout. At execution time, run against the
+gpu-96G runtime or full upstream checkout. At execution time, run against the
 platform's installed `nhmegatron` code and environment, not directly from the
 plugin snapshot.
 
 Use only the fixed Megatron/PyTorch environment and code already provided by the
-V5000 platform. The canonical domestic-accelerator repository is
+gpu-96G platform. The canonical domestic-accelerator repository is
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/` on branch `main`.
-`zj_examples/V5000` is a path relative to that repository root; it is not a path
-under the user's current project directory. Locate the platform's checkout
-first. If no checkout exists, use the plugin-local snapshot for reference;
-browsing or cloning the canonical GitLab repository is optional. Do not use a fork, mirror,
-or alternative implementation. When a checkout exists, use
-`<nhmegatron-root>/zj_examples/V5000`,
-`<nhmegatron-root>/zj_examples/V5000/xpu_env.sh`, and the repository's documented
-`toolkits` conversion flow.
+The example directory is relative to that repository root; it is not a path
+under the user.s current project directory. Locate the platform.s checkout
+first. If no checkout exists, use the plugin-local aliased snapshot for
+reference; browsing or cloning the canonical GitLab repository is optional. Do
+not use a fork, mirror, or alternative implementation. Use the corresponding
+official 96 GiB accelerator examples, their environment script, and the
+repository.s documented `toolkits` conversion flow.
 
 ## Official-example derivation rule
 
-Do not implement V5000 training logic, Python entrypoints, distributed launchers,
+Do not implement gpu-96G training logic, Python entrypoints, distributed launchers,
 or environment setup from scratch. Prefer an exact official script. If none
-matches exactly, copy the closest official script under `zj_examples/V5000` as
+matches exactly, copy the closest official script under `zj_examples/gpu-96G` as
 the sole template. Choose the same model family and architecture before using
 parameter-count proximity; for example, derive Qwen3-1.7B from the official
 Qwen3-8B example only after confirming architecture compatibility.
@@ -64,7 +62,7 @@ derived script path, exact diff, and command in the handoff.
 ## Mandatory VRAM budget
 
 Before selecting GPU count or running a derived script, estimate per-GPU peak
-VRAM against the V5000 96 GiB limit. Include model weights, gradients, optimizer
+VRAM against the gpu-96G 96 GiB limit. Include model weights, gradients, optimizer
 states, master weights, activations, attention and kernel workspaces,
 communication buffers, allocator/CUDA/framework overhead, and any replicated
 state implied by the chosen parallel strategy. Do not assume memory scales only
@@ -92,10 +90,10 @@ combination unsupported.
 
 Prepare stable datasets, checkpoints, converted model artifacts, configuration
 values, output paths, and handoff state before expansion when possible. In the
-continuation prompt, explicitly state that V5000 is a domestic accelerator
+continuation prompt, explicitly state that gpu-96G is a domestic accelerator
 cluster, `nhmegatron` is its domestic-accelerator framework, and card
 enumeration must use `xpu-smi` rather than `nvidia-smi`. Require the new
 runtime to compare the `xpu-smi` count with the requested `gpuCount`. Also name
-the official source example under `zj_examples/V5000`, any minimally derived
+the official source example under `zj_examples/gpu-96G`, any minimally derived
 script, its parameter diff, and the VRAM budget. Explicitly prohibit
 from-scratch training or launcher code.

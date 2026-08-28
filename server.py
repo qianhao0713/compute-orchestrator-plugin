@@ -6,6 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from config import Settings
 from handoff_manager import HandoffRecord, inspect_artifacts, write_handoff
+from gpu_aliases import to_backend_gpu_type, to_public
 from models import EnsureResourceRequest, PendingRequest, ResourceSpec
 from portal_client import PortalClient
 from resource_inspector import inspect_current_resources as inspect_local_resources
@@ -39,7 +40,7 @@ async def get_resource_status() -> dict[str, Any]:
     """
     result = await portal_client().get_current_provisioning()
     result["handoffEnabled"] = settings().enable_handoff
-    return result
+    return to_public(result)
 
 
 @mcp.tool()
@@ -49,7 +50,7 @@ async def get_available_clusters() -> dict[str, Any]:
     Call this after classifying the workload and before selecting a GPU cluster.
     An enabled cluster may still queue because this list is not live capacity.
     """
-    return await portal_client().get_available_clusters()
+    return to_public(await portal_client().get_available_clusters())
 
 
 @mcp.tool()
@@ -78,8 +79,9 @@ async def ensure_resource(
     and the server sends pendingRequest.message as an empty string. When true,
     pending_message must be non-empty.
 
-    Use gpu_type='Z1120' for V100 or 'V5000' for V5000. On a network timeout,
-    call again with exactly the same request ID and pending request content.
+    Use gpu_type='gpu-32G' for the 32 GiB CUDA cluster or 'gpu-96G' for the
+    96 GiB domestic-accelerator cluster. On a network timeout, call again with
+    exactly the same request ID and pending request content.
     """
     current_settings = settings()
     if current_settings.enable_handoff and not pending_message.strip():
@@ -98,7 +100,7 @@ async def ensure_resource(
             resourceType=resource_type,
             cpu=cpu,
             memoryGiB=memory_gib,
-            gpuType=gpu_type,
+            gpuType=to_backend_gpu_type(gpu_type) if resource_type == "GPU" else None,
             gpuCount=gpu_count,
             workerNum=worker_num,
         ),
@@ -113,13 +115,13 @@ async def ensure_resource(
     result = await portal_client().ensure_resource(request)
     result["submittedRequestId"] = request_id
     result["requestIdMatches"] = result.get("requestId") == request_id
-    return result
+    return to_public(result)
 
 
 @mcp.tool()
 def inspect_current_resources() -> dict[str, Any]:
     """Inspect effective CPU, RAM, GPU, VRAM, CUDA visibility, and PyTorch state."""
-    return inspect_local_resources()
+    return to_public(inspect_local_resources())
 
 
 @mcp.tool()

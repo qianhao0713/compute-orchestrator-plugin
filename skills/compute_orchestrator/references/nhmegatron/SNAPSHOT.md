@@ -1,9 +1,9 @@
-# nhmegatron V5000 example snapshot
+# nhmegatron gpu-96G example snapshot
 
 - Upstream: `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron.git`
 - Branch: `main`
 - Commit: `49ebf44cee9fe35eff7cbf7937066dc0ee0e22d6`
-- Imported path: `zj_examples/V5000`
+- Imported path: `zj_examples/gpu-96G`
 - Imported on: `2026-08-13`
 - Contents: 76 text scripts and configuration files, preserving upstream paths
 
@@ -15,5 +15,5 @@ recorded upstream commit byte-for-byte.
 The two upstream tokenizer binaries ending in `.model` are not included because
 they are runtime data rather than scripts. This snapshot is for offline template
 discovery, inspection, resource estimation, and minimal script derivation. It is
-not a complete `nhmegatron` checkout and must not replace the V5000 platform's
+not a complete `nhmegatron` checkout and must not replace the gpu-96G platform's
 installed code at execution time.

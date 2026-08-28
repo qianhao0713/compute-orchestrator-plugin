@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from config import Settings
+from gpu_aliases import to_public
 from models import EnsureResourceRequest, PortalEnvelope
 
 
@@ -21,11 +22,11 @@ class PortalAPIError(RuntimeError):
         http_status: int | None = None,
     ) -> None:
         self.code = code
-        self.message = message
+        self.message = to_public(message)
         self.trace_id = trace_id
         self.http_status = http_status
         super().__init__(
-            f"Portal API error code={code}, message={message!r}, "
+            f"Portal API error code={code}, message={self.message!r}, "
             f"traceId={trace_id!r}, httpStatus={http_status!r}"
         )
 

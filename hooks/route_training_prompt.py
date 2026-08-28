@@ -17,7 +17,7 @@ TRAINING_PATTERN = re.compile(
 )
 GPU_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:gpu|gpus|cuda|cudnn|nccl|nvidia|nvlink|vram|torchrun|"
-    r"deepspeed|megatron|flashattention|flash-attention|z1120|v5000)"
+    r"deepspeed|megatron|flashattention|flash-attention|gpu-32G|gpu-96G)"
     r"(?![a-z0-9])|"
     r"显卡|显存|多卡|单卡|卡间|GPU任务|GPU训练|GPU推理",
     re.I,
@@ -41,18 +41,18 @@ def build_hook_output(event: dict[str, Any]) -> dict[str, Any] | None:
             "inspect the task and code, assess required resources, inspect "
             "current resources, query available clusters, select a compatible "
             "fixed specification, and follow the skill's provisioning and "
-            "handoff workflow. For V5000, use only its fixed installed "
+            "handoff workflow. For gpu-96G, use only its fixed installed "
             "environment. Search the plugin-local snapshot at "
-            "skills/compute_orchestrator/references/nhmegatron/zj_examples/V5000 "
+            "skills/compute_orchestrator/references/nhmegatron/zj_examples/gpu-96G "
             "before making any web request, and use the existing scripts under "
-            "zj_examples/V5000 "
+            "zj_examples/gpu-96G "
             "inside the nhmegatron repository. If no local checkout exists, "
             "inspect https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ "
             "remotely; cloning is optional. That example path is "
             "relative to the nhmegatron repository root, not the current "
-            "project. Never implement V5000 training logic or launchers from "
+            "project. Never implement gpu-96G training logic or launchers from "
             "scratch. If no exact example exists, copy only the closest "
-            "same-family, same-architecture official V5000 example and make "
+            "same-family, same-architecture official gpu-96G example and make "
             "minimal model/hyperparameter changes. Calculate per-GPU peak "
             "VRAM including weights, gradients, optimizer/master states, "
             "activations, workspaces, communication buffers, and overhead; "
