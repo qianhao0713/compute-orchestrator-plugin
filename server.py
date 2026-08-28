@@ -79,7 +79,7 @@ async def ensure_resource(
     and the server sends pendingRequest.message as an empty string. When true,
     pending_message must be non-empty.
 
-    Use gpu_type='gpu-32G' for the 32 GiB CUDA cluster or 'GPU-96G' for the
+    Use gpu_type='GPU-32G' for the 32 GiB CUDA cluster or 'GPU-96G' for the
     96 GiB domestic-accelerator cluster. On a network timeout, call again with
     exactly the same request ID and pending request content.
     """

@@ -17,7 +17,7 @@ TRAINING_PATTERN = re.compile(
 )
 GPU_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:gpu|gpus|cuda|cudnn|nccl|nvidia|nvlink|vram|torchrun|"
-    r"deepspeed|megatron|flashattention|flash-attention|gpu-32G|GPU-96G)"
+    r"deepspeed|megatron|flashattention|flash-attention|GPU-32G|GPU-96G)"
     r"(?![a-z0-9])|"
     r"显卡|显存|多卡|单卡|卡间|GPU任务|GPU训练|GPU推理",
     re.I,

@@ -4,7 +4,7 @@ description: >
   Mandatory resource planning and provisioning for every GPU-related task and
   other compute-intensive workloads. Always use whenever a request mentions or
   requires GPU, CUDA, NVIDIA, VRAM, GPU inference, GPU training, multi-GPU,
-  torchrun, NCCL, gpu-32G, or GPU-96G, even for a small command or smoke test. Also
+  torchrun, NCCL, GPU-32G, or GPU-96G, even for a small command or smoke test. Also
   always use before executing model training or fine-tuning, including Qwen,
   Qwen2, Qwen2.5, Qwen3, Qwen3-VL, Llama, DeepSeek, SFT, LoRA, pretraining,
   continued pretraining, preference training, distributed training, Megatron,
@@ -42,19 +42,19 @@ smallest supported configuration that is reasonably likely to complete the task.
 Portal can provide:
 
 - CPU-only environments with 1–32 CPU cores;
-- gpu-32G GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
+- GPU-32G GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
 - GPU-96G domestic-accelerator training environments with 96 GiB VRAM per card,
   represented by `gpuType: "GPU-96G"`;
-- gpu-32G GPU counts of 1, 2, 4, or 8;
+- GPU-32G GPU counts of 1, 2, 4, or 8;
 - GPU-96G GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
 - multi-GPU and, when supported by Portal, multi-node execution.
 
 Never invent an unsupported GPU model or GPU count.
 
-Use the Portal GPU type names `gpu-32G` and `GPU-96G` consistently. Do not use
-hardware aliases for gpu-32G.
+Use the Portal GPU type names `GPU-32G` and `GPU-96G` consistently. Do not use
+hardware aliases for GPU-32G.
 
-Use only these exact gpu-32G `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
+Use only these exact GPU-32G `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
 `(2,16,128)`, `(4,32,256)`, and `(8,64,512)`.
 
 Use GPU-96G only for training supported Qwen, Llama, and DeepSeek models. GPU-96G
@@ -81,10 +81,14 @@ multiple workers or multiple nodes.
 
 Call `GET /scientist/deployment/clusters/available` after deciding CPU versus
 GPU and before every resource expansion. Treat returned identifiers
-case-insensitively. Never select gpu-32G when `gpu-32G` is absent or GPU-96G when
+case-insensitively. Never select GPU-32G when `GPU-32G` is absent or GPU-96G when
 `GPU-96G` is absent. An included identifier means enabled, not guaranteed idle
-capacity; provisioning may still queue. An empty list means no internal GPU
-cluster may be selected, but it does not prohibit a CPU-only K8s expansion.
+capacity; provisioning may still queue only for an included cluster. If a cluster
+is absent, mark it unavailable and do not select it, call `ensure_resource` for
+it, wait for it, poll for it, or attempt to queue it. Keep that prohibition until
+a later explicit `get_available_clusters` call includes the cluster again. An
+empty list means no internal GPU cluster may be selected, but it does not
+prohibit a CPU-only K8s expansion.
 
 This skill expects the plugin MCP server to expose these logical tools:
 
@@ -229,14 +233,20 @@ It should report:
     container.
 
 22. In all Claude-facing plans, explanations, prompts, tool arguments, status
-    summaries, and error reports, refer to GPU clusters only as `gpu-32G` or
+    summaries, and error reports, refer to GPU clusters only as `GPU-32G` or
     `GPU-96G`. Never disclose a GPU vendor, chip family, product name, device
     name, or other specific hardware model. Treat such details, backend
     identifiers, and legacy directory components from resource inspection,
     Portal payloads, logs, errors, or official templates as internal
     implementation details. Do not quote or repeat them to the user; normalize
-    the corresponding resource to `gpu-32G` or `GPU-96G`, and use only those
+    the corresponding resource to `GPU-32G` or `GPU-96G`, and use only those
     names as `ensure_resource.gpu_type`.
+
+23. After `get_available_clusters` reports a cluster as unavailable, do not
+    select it, submit `ensure_resource` for it, wait for it, poll for it, or try
+    to queue it. Queueing is permitted only for a cluster included in the latest
+    availability result. Keep the unavailable decision in force until a later
+    explicit availability call includes that cluster again.
 
 ## End-to-end procedure
 
@@ -334,8 +344,8 @@ Produce an internal resource plan containing:
 - `resourceType`: `CPU` or `GPU`;
 - CPU cores;
 - RAM in GiB;
-- GPU hardware/type: gpu-32G or, for supported training, GPU-96G;
-- GPU count: for gpu-32G one of `1`, `2`, `4`, or `8`; for GPU-96G one of
+- GPU hardware/type: GPU-32G or, for supported training, GPU-96G;
+- GPU count: for GPU-32G one of `1`, `2`, `4`, or `8`; for GPU-96G one of
   `1`, `2`, or `4`;
 - worker count;
 - confidence level;
@@ -347,9 +357,9 @@ GPU-96G tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
 or `(4,64,450)`. Each GPU has 96 GiB VRAM. Never request more than 4
 GPU-96G cards, and do not submit a non-matching GPU-96G tuple.
 
-For gpu-32G choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
+For GPU-32G choose the smallest fitting fixed tier: `(GPU, CPU, RAM GiB)` =
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`. Do not submit a
-non-matching gpu-32G tuple.
+non-matching GPU-32G tuple.
 
 #### CPU estimate
 
@@ -409,9 +419,9 @@ Do not decide GPU count by dividing estimated VRAM by per-GPU VRAM unless the
 code supports a suitable distribution strategy. Data parallelism duplicates the
 model on each GPU and does not solve model-fit OOM.
 
-#### gpu-32G compatibility
+#### GPU-32G compatibility
 
-Before requesting gpu-32G, account for its 32 GiB VRAM per GPU and CUDA
+Before requesting GPU-32G, account for its 32 GiB VRAM per GPU and CUDA
 architecture `sm70`, then check:
 
 - required CUDA compute capability;
@@ -421,7 +431,7 @@ architecture `sm70`, then check:
 - custom CUDA extension architecture flags;
 - library versions that may require newer GPUs.
 
-Adapt code to supported gpu-32G execution where possible without changing the
+Adapt code to supported GPU-32G execution where possible without changing the
 scientific target. Otherwise explain that the workload is incompatible with the
 available GPU fleet.
 
@@ -450,7 +460,7 @@ cat /sys/fs/cgroup/memory.max 2>/dev/null || true
 
 Then use the probe that matches `currentResource.gpuType`.
 
-For gpu-32G, use NVIDIA tooling:
+For GPU-32G, use its supported accelerator tooling:
 
 ```bash
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits
@@ -564,10 +574,10 @@ estimate required resources
 
 Call `get_available_clusters` immediately before the status/ensure flow. For GPU
 work, filter candidate cluster types by its result. If the preferred type is
-absent, use another enabled compatible cluster only when it can preserve the
-task's meaning and execution contract; otherwise stop and report that no
-compatible cluster is enabled. Never silently move GPU-96G fixed-code training to
-gpu-32G or run arbitrary code on GPU-96G.
+absent, do not wait, poll, or attempt to queue it. Use another enabled compatible
+cluster only when it can preserve the task's meaning and execution contract;
+otherwise stop and report that no compatible cluster is enabled. Never silently move GPU-96G fixed-code training to
+GPU-32G or run arbitrary code on GPU-96G.
 
 #### Fixed `AskUserQuestion` contracts
 
@@ -683,7 +693,7 @@ GPU request:
     "resourceType": "GPU",
     "cpu": 8,
     "memoryGiB": 64,
-    "gpuType": "gpu-32G",
+    "gpuType": "GPU-32G",
     "gpuCount": 1,
     "workerNum": 1
   },
@@ -889,7 +899,7 @@ distinguish:
 - memory leak;
 - invalid tensor shape;
 - software bug;
-- unsupported gpu-32G or GPU-96G kernel/environment;
+- unsupported GPU-32G or GPU-96G kernel/environment;
 - wrong distributed launch;
 - data corruption;
 - storage exhaustion;
@@ -961,8 +971,8 @@ Before calling `ensure_resource`, validate:
 - `cpu >= 1`;
 - `memoryGiB >= 1`;
 - CPU requests use `gpuCount == 0` and `gpuType == null`;
-- GPU requests use `gpuCount > 0` and `gpuType` equal to `gpu-32G` or `GPU-96G`;
-- gpu-32G GPU count is one of `1`, `2`, `4`, or `8`;
+- GPU requests use `gpuCount > 0` and `gpuType` equal to `GPU-32G` or `GPU-96G`;
+- GPU-32G GPU count is one of `1`, `2`, `4`, or `8`;
 - GPU-96G GPU count is one of `1`, `2`, or `4` and never exceeds `4`;
 - `workerNum == 1` unless explicit backend support says otherwise;
 - no `userId`, provider, runtime, image, or low-level resource UUID is sent;
@@ -970,7 +980,7 @@ Before calling `ensure_resource`, validate:
   field;
 - GPU-96G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple and
   never request more than 4 cards;
-- gpu-32G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
+- GPU-32G requests use exactly one fixed `(gpuCount,cpu,memoryGiB)` tuple;
 - the available-cluster response includes the selected GPU type;
 - the latest `get_resource_status` result contained a top-level boolean
   `provisioning`; no `data.provisioning` lookup was used;
@@ -1012,7 +1022,7 @@ understand task
      → if successful and machine switched:
           if handoffEnabled: Portal submits pendingRequest in the new Runtime
           otherwise: no automatic continuation prompt is expected
-          new Runtime re-inspects resources with `xpu-smi` on GPU-96G or `nvidia-smi` on gpu-32G
+          new Runtime re-inspects resources with `xpu-smi` on GPU-96G or `nvidia-smi` on GPU-32G
           verifies prepared artifacts
           uses fixed GPU-96G environment or installs required target dependencies
           smoke test
