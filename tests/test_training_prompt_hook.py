@@ -41,6 +41,8 @@ def test_gpu_96g_context_allows_eligible_non_llm_torch_workloads():
     assert "environment-default torch" in context
     assert "separate GPU runtime, backend, library" in context
     assert "replace, or shadow that torch" in context
+    assert "built-in GPU-96G operator" in context
+    assert "reachable operators" in context
 
 
 def test_deepseek_chinese_training_prompt_is_detected():

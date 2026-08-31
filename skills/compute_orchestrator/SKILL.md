@@ -65,7 +65,9 @@ PyTorch already installed in the GPU-96G environment. Upper-level packages
 that execute through PyTorch, such as a YOLO implementation, are allowed only
 when they satisfy that condition. Use the environment-default `torch`; never install, upgrade,
 downgrade, replace, or shadow it, and prevent dependency installation from doing
-so. If compatibility cannot be proven before execution, do not use GPU-96G.
+so. Before execution, also apply the GPU-96G PyTorch operator compatibility
+checklist in Phase 3.
+If dependency or operator compatibility cannot be proven, do not use GPU-96G.
 
 For an LLM task, retain the fixed Qwen, Llama, and DeepSeek training workflow.
 GPU-96G is a domestic accelerator cluster, and `nhmegatron` is its
@@ -270,6 +272,15 @@ It should report:
     through transitive dependency resolution. If this cannot be established,
     reject GPU-96G for the task.
 
+25. Before running any task on GPU-96G, apply the Phase 3 PyTorch operator
+    compatibility checklist to every reachable execution path, including indirect
+    dependency calls. A definite unsupported operation blocks direct
+    GPU-96G execution. Proceed only after replacing it with a semantically
+    equivalent supported operation or implementing an explicit correct CPU
+    fallback, then run a bounded path-specific smoke test. For restricted
+    operations, validate the exact dtype, shape, dimension, and arguments. Never
+    wait for the full workload to discover a known incompatibility.
+
 ## End-to-end procedure
 
 ### Phase 1: Understand the task
@@ -316,6 +327,39 @@ Do not request a GPU only because PyTorch, TensorFlow, JAX, or CUDA appears in
 dependencies. Verify that the execution path places meaningful work on a GPU.
 
 ### Phase 3: Generate or inspect the code
+
+#### GPU-96G PyTorch operator compatibility checklist
+
+Treat these as unsupported on GPU-96G:
+
+- complex dtypes: complex64/complex128 arithmetic, `abs`, `real`, `imag`,
+  `view_as_complex`, and `view_as_real`;
+- sparse tensors: conversion/creation, sparse-dense `mm`, and sparse reductions
+  or arithmetic;
+- float8 dtypes: e4m3fn/e5m2 conversion and computation;
+- accelerator quantization: per-tensor/per-channel quantization, dequantization,
+  and `torch.quantization` paths;
+- FFT variants: `fftn` at 3+ dimensions, `rfft2`, complex-result `fftshift`,
+  and N-D/2-D real inverse variants (`ifftn`, `irfft2`, `rfftn`, `irfftn`);
+  1-D FFT variants and `fft2`/`ifft2` remain allowed;
+- device `torch.nn.functional.ctc_loss`; an explicit CPU fallback is allowed;
+- `scatter_reduce(..., reduce="add")`; use a supported reduction such as `sum`,
+  `prod`, `mean`, `amax`, or `amin` when semantically equivalent.
+
+Treat `torch.linalg.tensorinv` and `torch.linalg.tensorsolve` as restricted:
+validate their exact input-shape requirements rather than assuming a missing
+operator.
+
+Before approving any GPU-96G execution path, inspect the task code, model code,
+direct and transitive dependencies, selected dtypes, tensor layouts and dimensions, and operator arguments for every listed
+unsupported or restricted operation. Do not rely on text search alone: follow
+indirect calls and data-dependent branches, then exercise the intended path with
+a bounded smoke test. If an unsupported operation is reachable, reject direct
+GPU-96G execution unless it is first replaced by a semantically equivalent
+supported operation or isolated behind an explicit CPU fallback that preserves
+task correctness. Re-estimate transfer and memory costs after a fallback. For a
+restricted operation, validate its exact shape, dtype, dimension, and argument
+combination before proceeding.
 
 For a supported Qwen, Llama, or DeepSeek training task targeting GPU-96G, do not
 perform the generic environment/code generation steps below. Follow the fixed
