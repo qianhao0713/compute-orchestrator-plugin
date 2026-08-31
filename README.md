@@ -15,19 +15,22 @@ resumes the task in the new Claude Code runtime.
 5. Call Portal `ensure` with `pendingRequest`.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
 7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
-   when required, smoke-tests, and executes the core computation. GPU-96G training uses
-   its fixed preinstalled environment and an existing training script under the
+   when required, smoke-tests, and executes the core computation. GPU-96G first
+   classifies work as LLM or non-LLM. LLM training uses its fixed preinstalled
+   environment and an existing training script under the
    `nhmegatron` repository's `zj_examples/GPU-96G` path. If no local checkout
    exists, the agent first uses the plugin-bundled official example snapshot;
    remote GitLab access is only a fallback. Missing exact variants may be minimally derived from the closest
    same-family official example after a per-GPU VRAM budget; from-scratch GPU-96G
-   training logic and launchers remain forbidden.
+   training logic and launchers remain forbidden. Non-LLM GPU tasks are allowed
+   only when their GPU path depends on no GPU library or runtime beyond the
+   environment-default torch, which must never be replaced or shadowed.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`.
-GPU-96G training hardware is represented as `gpuType: "GPU-96G"`; each GPU has
+GPU-96G resources are represented as `gpuType: "GPU-96G"`; each GPU has
 96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
 `(1,16,112)`, `(2,32,225)`, or `(4,64,450)` and must never exceed 4 cards.
 

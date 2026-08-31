@@ -43,7 +43,7 @@ Portal can provide:
 
 - CPU-only environments with 1–32 CPU cores;
 - GPU-32G GPU environments with 32 GiB VRAM per GPU and CUDA architecture `sm70`;
-- GPU-96G domestic-accelerator training environments with 96 GiB VRAM per card,
+- GPU-96G domestic-accelerator environments with 96 GiB VRAM per card,
   represented by `gpuType: "GPU-96G"`;
 - GPU-32G GPU counts of 1, 2, 4, or 8;
 - GPU-96G GPU counts of 1, 2, or 4, with a hard maximum of 4 cards;
@@ -57,15 +57,27 @@ hardware aliases for GPU-32G.
 Use only these exact GPU-32G `(GPU, CPU, RAM GiB)` tiers: `(1,8,64)`,
 `(2,16,128)`, `(4,32,256)`, and `(8,64,512)`.
 
-Use GPU-96G only for training supported Qwen, Llama, and DeepSeek models. GPU-96G
-is a domestic accelerator cluster, and `nhmegatron` is its domestic-accelerator
-training framework. Its environment, repository, conversion tools, examples,
-and launch scripts are fixed. Do not write training code or launchers from scratch. A derived launcher
-is allowed only by copying the closest official GPU-96G example and making minimal,
-reviewable model/hyperparameter changes after a VRAM estimate. Read
-[references/GPU-96G-training.md](references/GPU-96G-training.md) and search the local
-snapshot at `references/nhmegatron/zj_examples/GPU-96G` before planning or
-continuing a GPU-96G task. After switching to GPU-96G, use `xpu-smi`, not
+Classify every GPU-96G task as LLM or non-LLM before selecting this cluster. A
+non-LLM GPU task is allowed only when inspection of its executable path and
+dependency metadata confirms that it neither introduces nor requires a separate
+GPU runtime, backend, library implementation, or binary extension beyond the
+PyTorch already installed in the GPU-96G environment. Upper-level packages
+that execute through PyTorch, such as a YOLO implementation, are allowed only
+when they satisfy that condition. Use the environment-default `torch`; never install, upgrade,
+downgrade, replace, or shadow it, and prevent dependency installation from doing
+so. If compatibility cannot be proven before execution, do not use GPU-96G.
+
+For an LLM task, retain the fixed Qwen, Llama, and DeepSeek training workflow.
+GPU-96G is a domestic accelerator cluster, and `nhmegatron` is its
+domestic-accelerator training framework. Its environment, repository,
+conversion tools, examples, and launch scripts are fixed. Do not write LLM
+training code or launchers from scratch. A derived launcher is allowed only by
+copying the closest official GPU-96G example and making minimal, reviewable
+model/hyperparameter changes after a VRAM estimate. Read
+[references/GPU-96G-training.md](references/GPU-96G-training.md) and search the
+local snapshot at `references/nhmegatron/zj_examples/GPU-96G` before planning
+or continuing an LLM task on GPU-96G. After switching to GPU-96G, use
+`xpu-smi`, not
 `nvidia-smi`, to detect and count accelerator cards. Do not interpret a missing
 or empty `nvidia-smi` result as evidence that GPU-96G cards are unavailable. Do
 not fetch the same examples from the web when the local snapshot contains the
@@ -248,6 +260,16 @@ It should report:
     availability result. Keep the unavailable decision in force until a later
     explicit availability call includes that cluster again.
 
+24. Before selecting GPU-96G, classify the task as LLM or non-LLM. For an LLM
+    task, apply the fixed `nhmegatron` and official-template workflow without
+    exception. For a non-LLM task, inspect code and dependency metadata and use
+    GPU-96G only when it neither introduces nor requires a separate GPU runtime,
+    backend, library implementation, or binary extension beyond the
+    environment-default `torch`.
+    Never install, upgrade, downgrade, replace, or shadow that `torch`, including
+    through transitive dependency resolution. If this cannot be established,
+    reject GPU-96G for the task.
+
 ## End-to-end procedure
 
 ### Phase 1: Understand the task
@@ -309,6 +331,16 @@ architecture, copy it as the sole template, and change only necessary model
 structure, parallelism, batch, sequence, precision, recomputation, and stable
 path parameters. Never implement a new training loop or launcher from scratch.
 
+For a non-LLM task targeting GPU-96G, use the task's existing code only after
+verifying its complete GPU execution path and direct and transitive dependencies.
+Reject dependencies that bring their own GPU runtime, backend, or binary
+extension. Task-level Python packages are allowed when all accelerator operations
+flow through the environment-default `torch`. Record its version and import path before execution, preserve them during any package installation, and
+verify them again afterward. Do not install a requirements or project dependency
+set when its resolver would change `torch`; use a compatible installation method
+that leaves the default `torch` untouched, or reject GPU-96G. Run a bounded
+PyTorch device smoke test before the workload.
+
 Before the final resource estimate:
 
 1. inspect the existing repository and configuration;
@@ -352,7 +384,7 @@ Produce an internal resource plan containing:
 - assumptions;
 - headroom.
 
-For supported model training, also assess GPU-96G and choose the smallest fixed
+For any eligible LLM or non-LLM GPU-96G task, choose the smallest fixed
 GPU-96G tier that fits: `(GPU, CPU, RAM GiB)` = `(1,16,112)`, `(2,32,225)`,
 or `(4,64,450)`. Each GPU has 96 GiB VRAM. Never request more than 4
 GPU-96G cards, and do not submit a non-matching GPU-96G tuple.
@@ -537,8 +569,10 @@ Dependency installation is not pre-switch preparation. Do not install or
 upgrade Python packages, system packages, CUDA libraries, framework
 dependencies, or create/modify the execution environment in the old container.
 Record all required dependencies in the handoff and install them only after the
-new container is active. For GPU-96G, continue to follow its fixed environment,
-code, and script rules rather than creating a replacement environment.
+new container is active. On GPU-96G, never replace the fixed environment or its
+default `torch`. Apply the fixed code and script rules to LLM tasks; for non-LLM
+tasks, install only compatible packages that leave the default `torch` and GPU
+runtime unchanged.
 
 Do not perform preparation in the current container when it itself requires the
 target resource or would exceed current CPU/RAM limits.
@@ -576,8 +610,9 @@ Call `get_available_clusters` immediately before the status/ensure flow. For GPU
 work, filter candidate cluster types by its result. If the preferred type is
 absent, do not wait, poll, or attempt to queue it. Use another enabled compatible
 cluster only when it can preserve the task's meaning and execution contract;
-otherwise stop and report that no compatible cluster is enabled. Never silently move GPU-96G fixed-code training to
-GPU-32G or run arbitrary code on GPU-96G.
+otherwise stop and report that no compatible cluster is enabled. Never silently
+move GPU-96G LLM training to GPU-32G. Run non-LLM code on
+GPU-96G only after the eligibility checks in rule 24 pass.
 
 #### Fixed `AskUserQuestion` contracts
 
@@ -739,19 +774,24 @@ The `pendingRequest.message` should contain:
 - expected outputs and success criteria;
 - instructions to inspect persisted state before repeating work.
 
-For GPU-96G, it must explicitly state that GPU-96G is a domestic accelerator
-cluster, `nhmegatron` is its domestic-accelerator training framework, and the
-new runtime must use `xpu-smi` rather than `nvidia-smi` to enumerate and count
-cards. It must require comparing the `xpu-smi` count with the requested
+For an LLM task on GPU-96G, it must explicitly state that GPU-96G is a domestic
+accelerator cluster, `nhmegatron` is its domestic-accelerator training framework,
+and the new runtime must use `xpu-smi` rather than `nvidia-smi` to
+enumerate and count cards. It must require comparing the `xpu-smi` count with
+the requested
 `gpuCount` before training. It must also state that `zj_examples/GPU-96G` is
-relative to the root
-of the canonical `nhmegatron` repository from
+relative to the root of the canonical `nhmegatron` repository from
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/`, not relative to the
 current project directory. If the repository is absent, it must instruct the
 Runtime to consult the plugin-local snapshot first; remote GitLab inspection and
 cloning are optional fallbacks. It must identify the exact official source template and any
 derived script, enumerate every changed parameter, include the per-GPU VRAM
 estimate and headroom, and forbid from-scratch training code or launchers.
+
+For a non-LLM task on GPU-96G, the continuation must instead state that the task
+passed the no-extra-GPU-dependency check, record the environment-default `torch`
+version and import path, forbid replacing or shadowing it, and require
+re-verification before execution.
 
 A suitable continuation prompt resembles:
 
@@ -1024,7 +1064,8 @@ understand task
           otherwise: no automatic continuation prompt is expected
           new Runtime re-inspects resources with `xpu-smi` on GPU-96G or `nvidia-smi` on GPU-32G
           verifies prepared artifacts
-          uses fixed GPU-96G environment or installs required target dependencies
+          preserves the fixed GPU-96G environment and default torch
+          or installs only compatible target dependencies
           smoke test
           executes core task exactly once
        else if NO_CHANGE:

@@ -18,7 +18,7 @@ def test_cuda_inference_is_detected():
 
 
 def test_explicit_cluster_name_is_detected():
-    assert build_hook_output({"prompt": "切换到gpu-32G跑程序"}) is not None
+    assert build_hook_output({"prompt": "切换到GPU-32G跑程序"}) is not None
 
 
 def test_gpu_96g_context_requires_official_template_and_vram_budget():
@@ -32,6 +32,15 @@ def test_gpu_96g_context_requires_official_template_and_vram_budget():
     assert "Never implement GPU-96G training logic or launchers from scratch" in context
     assert "same-family, same-architecture" in context
     assert "96 GiB" in context
+
+
+def test_gpu_96g_context_allows_eligible_non_llm_torch_workloads():
+    result = build_hook_output({"prompt": "用GPU-96G训练YOLO"})
+    context = result["hookSpecificOutput"]["additionalContext"]
+    assert "as LLM or non-LLM" in context
+    assert "environment-default torch" in context
+    assert "separate GPU runtime, backend, library" in context
+    assert "replace, or shadow that torch" in context
 
 
 def test_deepseek_chinese_training_prompt_is_detected():
