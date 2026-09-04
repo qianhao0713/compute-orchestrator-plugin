@@ -32,16 +32,18 @@ GPU-96G runtime or full upstream checkout. At execution time, run against the
 platform's installed `nhmegatron` code and environment, not directly from the
 plugin snapshot.
 
-Use only the fixed Megatron/PyTorch environment and code already provided by the
-GPU-96G platform. The canonical domestic-accelerator repository is
+Use only the `python310_torch29_cuda` Conda environment and fixed Megatron code
+already provided by the GPU-96G platform. Activate that environment in every
+shell command or use `conda run -n python310_torch29_cuda`; do not assume Conda
+activation persists across Claude Code tool calls. The canonical domestic-accelerator repository is
 `https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/` on branch `main`.
 The example directory is relative to that repository root; it is not a path
-under the user.s current project directory. Locate the platform.s checkout
+under the user's current project directory. Locate the platform's checkout
 first. If no checkout exists, use the plugin-local aliased snapshot for
 reference; browsing or cloning the canonical GitLab repository is optional. Do
 not use a fork, mirror, or alternative implementation. Use the corresponding
 official 96 GiB accelerator examples, their environment script, and the
-repository.s documented `toolkits` conversion flow.
+repository's documented `toolkits` conversion flow.
 
 ## Official-example derivation rule
 

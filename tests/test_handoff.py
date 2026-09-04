@@ -42,8 +42,9 @@ def test_partial_artifact_not_ready(tmp_path: Path):
 
 
 class _CapturingPortalClient:
-    def __init__(self):
+    def __init__(self, clusters=None):
         self.request = None
+        self.clusters = ["Z1120", "V5000"] if clusters is None else clusters
 
     async def ensure_resource(self, request):
         self.request = request
@@ -51,6 +52,9 @@ class _CapturingPortalClient:
 
     async def get_current_provisioning(self):
         return {"provisioning": False}
+
+    async def get_available_clusters(self):
+        return {"clusters": self.clusters}
 
 
 def _settings(tmp_path: Path, *, enable_handoff: bool) -> Settings:
@@ -142,3 +146,47 @@ async def test_resource_status_exposes_handoff_setting(monkeypatch, tmp_path):
     result = await server.get_resource_status()
 
     assert result["handoffEnabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_rechecks_gpu_availability_before_submit(monkeypatch, tmp_path):
+    client = _CapturingPortalClient(clusters=["Z1120"])
+    monkeypatch.setattr(
+        server, "settings", lambda: _settings(tmp_path, enable_handoff=False)
+    )
+    monkeypatch.setattr(server, "portal_client", lambda: client)
+
+    with pytest.raises(ValueError, match="GPU-96G is unavailable"):
+        await server.ensure_resource(
+            request_id="request-1",
+            resource_type="GPU",
+            cpu=16,
+            memory_gib=112,
+            gpu_count=1,
+            gpu_type="GPU-96G",
+            session_id="session-1",
+        )
+
+    assert client.request is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_submits_when_gpu_is_available(monkeypatch, tmp_path):
+    client = _CapturingPortalClient(clusters=["V5000"])
+    monkeypatch.setattr(
+        server, "settings", lambda: _settings(tmp_path, enable_handoff=False)
+    )
+    monkeypatch.setattr(server, "portal_client", lambda: client)
+
+    result = await server.ensure_resource(
+        request_id="request-1",
+        resource_type="GPU",
+        cpu=16,
+        memory_gib=112,
+        gpu_count=1,
+        gpu_type="GPU-96G",
+        session_id="session-1",
+    )
+
+    assert result["submittedRequestId"] == "request-1"
+    assert client.request is not None

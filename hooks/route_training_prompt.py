@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add resource-assessment context to every user prompt."""
+"""Inject a short, high-priority compute-policy route for every prompt."""
 
 from __future__ import annotations
 
@@ -33,50 +33,27 @@ def build_hook_output(event: dict[str, Any]) -> dict[str, Any] | None:
 
     if explicit_gpu:
         context = (
-            "Compute policy: this request explicitly indicates a GPU workload. "
-            "The compute-orchestrator skill applies and must be loaded before "
-            "any setup, conversion, launcher, shell, torchrun, DeepSpeed, "
-            "Megatron, or workload command is executed. The initial CPU "
-            "runtime is not an approved default GPU workload target. First "
-            "inspect the task and code, assess required resources, inspect "
-            "current resources, query available clusters, select a compatible "
-            "fixed specification, and follow the skill's provisioning and "
-            "handoff workflow. Before selecting GPU-96G, classify the task "
-            "as LLM or non-LLM. For an LLM task, use only the fixed installed "
-            "environment and official nhmegatron templates. Search the plugin-local "
-            "snapshot "
-            "at skills/compute_orchestrator/references/nhmegatron/zj_examples/GPU-96G "
-            "before making any web request. If needed, inspect "
-            "https://gitlab.zhejianglab.com/nh-megatron/nhmegatron/ remotely; "
-            "cloning is optional, and zj_examples/GPU-96G is relative to the "
-            "nhmegatron repository root. Never implement GPU-96G training logic "
-            "or launchers from scratch; minimally derive only from the closest "
-            "same-family, same-architecture official example, calculate per-GPU "
-            "peak VRAM with safety headroom under 96 GiB, and smoke-test. For a "
-            "non-LLM task, inspect its executable path and all direct and "
-            "transitive dependencies and apply the Skill's built-in GPU-96G operator "
-            "compatibility checklist. Trace reachable operators, dtypes, shapes, dimensions, and arguments; "
-            "reject known unsupported paths unless replaced with an equivalent "
-            "supported operation or a correct explicit CPU fallback, then smoke-test. "
-            "Use GPU-96G only if the task neither "
-            "introduces nor requires a separate GPU runtime, backend, library "
-            "implementation, or binary extension beyond the environment-default "
-            "torch. Never install, upgrade, downgrade, replace, or shadow "
-            "that torch; reject GPU-96G if compatibility cannot "
-            "be proven."
+            "Mandatory compute gate: load the compute-orchestrator skill before "
+            "any setup, installation, shell, launcher, or workload command. "
+            "Follow its Required workflow and Mandatory safety gates in order. "
+            "Inspect executable code, estimate resources, and inspect current "
+            "container resources before execution or expansion. If GPU-96G is a "
+            "candidate or current runtime, read references/GPU-96G-runtime.md; "
+            "classify LLM versus non-LLM. For LLM work also read "
+            "references/GPU-96G-training.md and use only official templates. "
+            "For non-LLM work enforce the named Conda environment, dependency "
+            "boundary, and built-in operator checklist. Do not proceed until "
+            "the applicable gates pass."
         )
     else:
         context = (
-            "Compute policy: before executing setup, installation, launcher, "
-            "shell, or workload commands for this request, first determine "
-            "from the task and executable code whether GPU, CUDA, substantial "
-            "VRAM, or multi-GPU compute may be required. If the assessment "
-            "indicates GPU use or a meaningful possibility of GPU use, load "
-            "the compute-orchestrator skill before executing those commands, "
-            "then inspect current resources and query available clusters. Do "
-            "not begin a GPU-suitable workload in the initial CPU runtime. "
-            "Proceed without the skill only after positively classifying the "
-            "task as CPU-only and suitable for current resources."
+            "Compute classification gate: before setup, installation, shell, "
+            "launcher, or workload commands, inspect the task and executable "
+            "path for possible GPU or substantial compute use. If GPU use is "
+            "required or meaningfully possible, load the compute-orchestrator "
+            "skill and follow its workflow before executing. Proceed directly "
+            "only after positively classifying the task as CPU-only and fitting "
+            "the current effective container resources."
         )
 
     return {

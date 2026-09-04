@@ -6,7 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from config import Settings
 from handoff_manager import HandoffRecord, inspect_artifacts, write_handoff
-from gpu_aliases import to_backend_gpu_type, to_public
+from gpu_aliases import public_gpu_type, to_backend_gpu_type, to_public
 from models import EnsureResourceRequest, PendingRequest, ResourceSpec
 from portal_client import PortalClient
 from resource_inspector import inspect_current_resources as inspect_local_resources
@@ -29,6 +29,24 @@ def portal_client() -> PortalClient:
     if _client is None:
         _client = PortalClient(settings())
     return _client
+
+
+async def _require_available_gpu_cluster(gpu_type: str) -> None:
+    result = await portal_client().get_available_clusters()
+    clusters = result.get("clusters")
+    if not isinstance(clusters, list):
+        raise ValueError("Portal did not return a valid available-cluster list")
+    available = {
+        public_gpu_type(value).lower()
+        for value in clusters
+        if isinstance(value, str)
+    }
+    requested = public_gpu_type(gpu_type)
+    if requested is None or requested.lower() not in available:
+        raise ValueError(
+            f"{requested or 'Requested GPU cluster'} is unavailable; "
+            "the request was not submitted and must not be queued or waited for"
+        )
 
 
 @mcp.tool()
@@ -112,6 +130,8 @@ async def ensure_resource(
             attachmentRefs=attachment_refs or [],
         ),
     )
+    if request.resource.resource_type == "GPU":
+        await _require_available_gpu_cluster(request.resource.gpu_type or "")
     result = await portal_client().ensure_resource(request)
     result["submittedRequestId"] = request_id
     result["requestIdMatches"] = result.get("requestId") == request_id

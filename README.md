@@ -16,7 +16,9 @@ resumes the task in the new Claude Code runtime.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
 7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
    when required, smoke-tests, and executes the core computation. GPU-96G first
-   classifies work as LLM or non-LLM. LLM training uses its fixed preinstalled
+   classifies work as LLM or non-LLM. It unconditionally uses
+   `python310_torch29_cuda` as the default Conda environment for all Python,
+   pip, torchrun, launcher, smoke-test, and workload commands. LLM training uses its fixed preinstalled
    environment and an existing training script under the
    `nhmegatron` repository's `zj_examples/GPU-96G` path. If no local checkout
    exists, the agent first uses the plugin-bundled official example snapshot;
@@ -24,7 +26,7 @@ resumes the task in the new Claude Code runtime.
    same-family official example after a per-GPU VRAM budget; from-scratch GPU-96G
    training logic and launchers remain forbidden. Non-LLM GPU tasks are allowed
    only when their GPU path depends on no GPU library or runtime beyond the
-   environment-default torch, which must never be replaced or shadowed.
+   the `python310_torch29_cuda` Conda environment's torch, which must never be replaced or shadowed.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
