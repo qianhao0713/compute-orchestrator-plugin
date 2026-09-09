@@ -36,10 +36,17 @@ async def _require_available_gpu_cluster(gpu_type: str) -> None:
     clusters = result.get("clusters")
     if not isinstance(clusters, list):
         raise ValueError("Portal did not return a valid available-cluster list")
-    available = {
-        public_gpu_type(value).lower()
+    cluster_names = (
+        value if isinstance(value, str) else value.get("cluster")
         for value in clusters
+        if isinstance(value, (str, dict))
+    )
+    available = {
+        public_name.lower()
+        for value in cluster_names
         if isinstance(value, str)
+        for public_name in [public_gpu_type(value)]
+        if public_name is not None
     }
     requested = public_gpu_type(gpu_type)
     if requested is None or requested.lower() not in available:
@@ -63,10 +70,12 @@ async def get_resource_status() -> dict[str, Any]:
 
 @mcp.tool()
 async def get_available_clusters() -> dict[str, Any]:
-    """Return Portal cluster types currently enabled for resource requests.
+    """Return Portal clusters currently enabled for resource requests.
 
     Call this after classifying the workload and before selecting a GPU cluster.
-    An enabled cluster may still queue because this list is not live capacity.
+    Current responses include cluster, resourceSpec, and remainCardNum; legacy
+    Portal responses may contain cluster-name strings. Remaining cards are a
+    query-time snapshot, not a reservation, so an enabled cluster may still queue.
     """
     return to_public(await portal_client().get_available_clusters())
 

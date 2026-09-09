@@ -107,7 +107,56 @@ class PortalClient:
         self._log_request(method="GET", url=url, headers=headers)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.get(url, headers=headers)
-        return self._parse_list(response, key="clusters")
+        return self._parse_available_clusters(response)
+
+    @classmethod
+    def _parse_available_clusters(cls, response: httpx.Response) -> dict[str, Any]:
+        """Parse both legacy string entries and current cluster detail objects."""
+        data, trace_id = cls._parse_envelope(response)
+        if not isinstance(data, list):
+            raise PortalAPIError(
+                code="INVALID_DATA",
+                message="Portal response data must be a list",
+                trace_id=trace_id,
+                http_status=response.status_code,
+            )
+
+        clusters: list[str | dict[str, str]] = []
+        for entry in data:
+            if isinstance(entry, str):
+                clusters.append(entry)
+                continue
+            if not isinstance(entry, dict):
+                raise PortalAPIError(
+                    code="INVALID_DATA",
+                    message="Available cluster entries must be strings or objects",
+                    trace_id=trace_id,
+                    http_status=response.status_code,
+                )
+            cluster = entry.get("cluster")
+            resource_spec = entry.get("resourceSpec")
+            remain_card_num = entry.get("remainCardNum")
+            if not all(
+                isinstance(value, str) and value.strip()
+                for value in (cluster, resource_spec, remain_card_num)
+            ):
+                raise PortalAPIError(
+                    code="INVALID_DATA",
+                    message=(
+                        "Available cluster objects require non-empty cluster, "
+                        "resourceSpec, and remainCardNum strings"
+                    ),
+                    trace_id=trace_id,
+                    http_status=response.status_code,
+                )
+            clusters.append(
+                {
+                    "cluster": cluster,
+                    "resourceSpec": resource_spec,
+                    "remainCardNum": remain_card_num,
+                }
+            )
+        return {"clusters": clusters, "traceId": trace_id}
 
     async def ensure_resource(
         self, request: EnsureResourceRequest
