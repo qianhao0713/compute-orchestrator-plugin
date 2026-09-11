@@ -3,12 +3,35 @@
 Read this file only when current resources are insufficient or a Portal
 operation is already active.
 
+## Existing queued request while current resources suffice
+
+Before the first smoke test or workload command for the submitted task, if
+`get_resource_status.provisioning == true` and current resources suffice, execute
+this fixed `AskUserQuestion` in the language used by the user:
+
+```json
+{"questions":[{"header":"运行任务","question":"当前分配资源能够运行新提交的任务。目前存在排队任务，排队成功后会自动切换资源暂停当时正在运行的其他任务，是否继续提交任务。","multiSelect":false,"options":[{"label":"继续","description":"继续提交并运行当前任务。"},{"label":"取消","description":"不提交当前任务。"}]}]}
+```
+
+English: header `Run task`; question `The currently allocated resources can run
+the newly submitted task. There are queued tasks. Once queued successfully,
+resources will be automatically switched, suspending other running tasks. Do you
+want to proceed with task submission?` Options: `Continue` / `Submit and run the
+current task.` and `Cancel` / `Do not submit the current task.`
+
+`Continue` authorizes this submitted task and directly allows its smoke test and
+workload commands. Do not poll, call `ensure_resource`, cancel, or replace the
+existing queued request. `Cancel`, Other/free-form, empty, multiple, or unknown
+answers forbid execution. Earlier consent does not satisfy this per-task gate.
+
 ## Required sequence
 
 1. Call `get_available_clusters` immediately before provisioning. For GPU work,
-   select only a cluster included in the latest result. An included cluster may
-   queue. An absent cluster must not be selected, submitted, waited for, polled,
-   or queued until a later explicit availability call includes it.
+   reach this sequence only when the current GPU is incompatible or insufficient,
+   then apply the suitability-first, capacity-aware selection in SKILL.md. Select
+   only a cluster included in the latest result. An absent cluster must not be
+   selected, submitted, waited for, polled, or queued until a later explicit
+   availability call includes it.
 2. Finish resource-independent preparation in the current container. Do not
    install dependencies there. Persist reusable artifacts on stable storage.
 3. Call `get_resource_status`; its top-level boolean `provisioning` is
@@ -18,7 +41,8 @@ operation is already active.
 5. On confirmation, call `ensure_resource` immediately. Do no further work in
    the old container after an accepted switch request.
 
-When `provisioning == false`, ask:
+When `provisioning == false` and the selected cluster reports enough cards, or
+only legacy capacity-unknown entries are available, ask:
 
 ```json
 {"questions":[{"header":"切换资源","question":"成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。","multiSelect":false,"options":[{"label":"确认切换","description":"确认提交资源切换请求。"},{"label":"取消","description":"不提交资源切换请求。"}]}]}
@@ -30,6 +54,23 @@ switch. If resources are currently insufficient, the request will be queued
 first, and resources will switch automatically once queuing succeeds.` Options:
 `Confirm switch` / `Submit the resource-switch request.` and `Cancel` / `Do not
 submit the resource-switch request.`
+
+When `provisioning == false` and every compatible cluster reports fewer cards
+than the requested GPU count, ask:
+
+```json
+{"questions":[{"header":"进入排队","question":"目前算力资源紧张，您的任务需要进入排队队列。排队成功后任务将立即启动执行，这可能会中断您其他正在运行的对话。请问您是否要进入排队。","multiSelect":false,"options":[{"label":"是的","description":"提交资源请求并进入排队队列。"},{"label":"取消","description":"不提交资源请求。"}]}]}
+```
+
+English: header `Join queue`; question `Computing resources are currently
+constrained, and your task needs to be placed in the queue. Upon successful
+queuing, the task will start immediately, which may interrupt your other ongoing
+conversations. Would you like to join the queue?` Options: `Yes` / `Submit the
+resource request and join the queue.` and `Cancel` / `Do not submit the resource
+request.`
+
+`Yes` permits the immediate `ensure_resource` call. `Cancel`, Other/free-form,
+empty, multiple, or unknown answers forbid submission.
 
 When `provisioning == true`, treat the active request as a different target
 without comparing specifications, and ask:

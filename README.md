@@ -31,7 +31,7 @@ resumes the task in the new Claude Code runtime.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
-`(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`.
+`(1,8,64)`, `(2,16,128)`, or `(4,32,256)`, and must never exceed 4 cards.
 GPU-96G resources are represented as `gpuType: "GPU-96G"`; each GPU has
 96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
 `(1,16,112)`, `(2,32,225)`, or `(4,64,450)` and must never exceed 4 cards.
@@ -59,9 +59,14 @@ GPU-96G resources are represented as `gpuType: "GPU-96G"`; each GPU has
 MCP tools intentionally do not poll indefinitely. The Skill controls polling so
 users can see status and the old runtime can stop safely during migration.
 
-Before choosing a GPU target, callers query the available-cluster tool and avoid
-clusters absent from its result. Portal creates a new Runtime session after a
-resource switch. The ensure request carries the current Claude Code `sessionId`,
+Callers keep a compatible, sufficient current GPU rather than switching to a
+more suitable cluster. Only when switching is necessary do they query the
+available-cluster tool, rank task-compatible clusters, and prefer one with
+enough reported cards,
+and use the best-suited cluster with queue confirmation when none has enough.
+Legacy name-only responses retain unknown-capacity behavior. Clusters absent from
+the result are forbidden. Portal creates a new Runtime session after a resource
+switch. The ensure request carries the current Claude Code `sessionId`,
 injected from trusted `PreToolUse` hook context; callers must not generate it.
 
 The plugin's `UserPromptSubmit` hook adds a resource-classification rule to every

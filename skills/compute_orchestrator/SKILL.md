@@ -24,24 +24,32 @@ is long.
    [resource estimation](references/resource-estimation.md).
 4. Call inspect_current_resources and compare effective container resources,
    not host resources, with the estimate.
-5. If current resources suffice, smoke-test and execute exactly once.
-6. If insufficient, finish only preparation that does not require the target
+5. Before any smoke test or workload command, call get_resource_status. If
+   current resources suffice and provisioning is true, read
+   [Portal provisioning](references/portal-provisioning.md) and use its fixed queued-switch risk
+   AskUserQuestion. Continue executes the submitted task immediately; Cancel or
+   any invalid answer forbids it. Do not poll and do not call ensure_resource.
+6. If the current GPU cluster can correctly run the task and its resources
+   suffice, keep it even when another compatible cluster is more suitable. Do
+   not call ensure_resource merely to optimize placement. When provisioning is
+   false, or the user chose Continue in step 5, smoke-test and execute once.
+7. If insufficient, finish only preparation that does not require the target
    resources. Do not install dependencies before switching. Persist reusable
    artifacts on stable storage.
-7. Read [Portal provisioning](references/portal-provisioning.md), then execute
+8. Read [Portal provisioning](references/portal-provisioning.md), then execute
    its availability, status, confirmation, request, and handoff sequence.
-8. After a real switch, re-inspect resources and persisted state, smoke-test,
+9. After a real switch, re-inspect resources and persisted state, smoke-test,
    and execute exactly once. On NO_CHANGE, continue exactly once in the current
    runtime.
-9. On failure, read [failure recovery](references/failure-recovery.md) before
+10. On failure, read [failure recovery](references/failure-recovery.md) before
    retrying or resizing.
 
 ## Resource envelope
 
 Use only these public cluster names and exact (GPU, CPU, RAM GiB) tiers:
 
-- GPU-32G, 32 GiB per GPU, architecture sm70:
-  (1,8,64), (2,16,128), (4,32,256), (8,64,512).
+- GPU-32G, 32 GiB per GPU, architecture sm70, maximum 4 cards:
+  (1,8,64), (2,16,128), (4,32,256).
 - GPU-96G, 96 GiB per card, maximum 4 cards:
   (1,16,112), (2,32,225), (4,64,450).
 - CPU-only: 1–32 CPU cores; request the smallest sufficient allocation.
@@ -49,6 +57,31 @@ Use only these public cluster names and exact (GPU, CPU, RAM GiB) tiers:
 
 Never invent another GPU type, count, or tuple. Do not request larger resources
 merely for speed.
+
+## GPU cluster selection
+
+First reuse the current GPU cluster whenever it can correctly run the task and
+its allocated resources suffice. This takes precedence over suitability ranking,
+reported capacity, performance preference, and queue avoidance. Never switch
+merely because another compatible cluster is more suitable.
+
+Only when the current cluster is incompatible or insufficient, rank compatible
+clusters by task suitability before considering current capacity. Use VRAM,
+architecture, executable dependencies, operator support, required runtime or
+framework, and the smallest sufficient fixed tier. A cluster that cannot
+correctly run the task is never a fallback.
+
+Read `remainCardNum` from each current object returned by
+get_available_clusters and compare it with the required GPU count:
+
+1. Select the most suitable cluster if it has enough available cards.
+2. Otherwise, select the highest-ranked other compatible cluster that has
+   enough cards.
+3. If no compatible cluster has enough cards, select the original most suitable
+   cluster and use the fixed queue AskUserQuestion in portal-provisioning.md.
+
+A legacy string entry has unknown capacity, not zero capacity. Preserve legacy
+selection behavior and never claim immediate capacity from that entry.
 
 ## GPU-96G routing
 
@@ -72,6 +105,12 @@ command or use conda run -n python310_torch29_cuda; never assume activation
 persists across Claude Code calls.
 
 ## Mandatory safety gates
+
+Before every smoke test or workload launch, require a fresh get_resource_status.
+When current resources suffice and provisioning == true, use the fixed queued-
+switch risk AskUserQuestion in portal-provisioning.md. Continue directly allows
+the submitted task; Cancel or an invalid answer forbids it. Do not poll or call
+ensure_resource in this branch. Missing or non-boolean provisioning fails closed.
 
 1. Before every resource expansion, call get_available_clusters. A GPU cluster
    absent from the latest result cannot be selected, submitted, waited for,
@@ -139,7 +178,11 @@ Before execution or provisioning, verify:
 - executable path and inputs were inspected;
 - resource estimate and smallest supported tier are documented;
 - current effective resources were inspected;
+- a compatible and sufficient current GPU cluster is reused without requesting
+  a more suitable cluster;
 - selected GPU cluster appears in the latest availability result;
+- capacity-aware routing preserved task compatibility and used the fixed queue
+  confirmation when no compatible cluster had enough reported cards;
 - GPU-96G branch rules and named Conda environment are active when applicable;
 - training scripts contain no broad kill;
 - the correct fixed confirmation was accepted immediately before provisioning;

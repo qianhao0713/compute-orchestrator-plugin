@@ -136,15 +136,20 @@ class PortalClient:
             cluster = entry.get("cluster")
             resource_spec = entry.get("resourceSpec")
             remain_card_num = entry.get("remainCardNum")
-            if not all(
-                isinstance(value, str) and value.strip()
-                for value in (cluster, resource_spec, remain_card_num)
+            if (
+                not isinstance(cluster, str)
+                or not cluster.strip()
+                or not isinstance(resource_spec, str)
+                or not resource_spec.strip()
+                or not isinstance(remain_card_num, str)
+                or not remain_card_num.strip().isdigit()
             ):
                 raise PortalAPIError(
                     code="INVALID_DATA",
                     message=(
-                        "Available cluster objects require non-empty cluster, "
-                        "resourceSpec, and remainCardNum strings"
+                        "Available cluster objects require non-empty cluster and "
+                        "resourceSpec strings plus a non-negative integer "
+                        "remainCardNum string"
                     ),
                     trace_id=trace_id,
                     http_status=response.status_code,
