@@ -13,10 +13,12 @@ domestic-accelerator training framework. GPU-96G has 96 GiB VRAM per card and ac
 Send `resourceType: GPU`, `gpuType: GPU-96G`, and `workerNum: 1`. Select the
 smallest tuple that supports the documented example and parallel strategy.
 
-After migration to GPU-96G, run `xpu-smi` to enumerate and count accelerator
-cards. Do not use `nvidia-smi` for GPU-96G card discovery, do not fall back to it,
-and do not treat its failure or empty output as a missing-card condition. Compare
-the `xpu-smi` device count with the requested Portal `gpuCount` before training.
+After migration to GPU-96G, use `inspect_current_resources` to enumerate and
+count cards without exposing physical device names. The inspector runs only
+`xpu-smi -q -d MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS` and does not return its
+raw output. Compare the
+sanitized device count with the requested Portal
+`gpuCount` before training.
 
 ## Local official-example snapshot
 
@@ -94,8 +96,8 @@ Prepare stable datasets, checkpoints, converted model artifacts, configuration
 values, output paths, and handoff state before expansion when possible. In the
 continuation prompt, explicitly state that GPU-96G is a domestic accelerator
 cluster, `nhmegatron` is its domestic-accelerator framework, and card
-enumeration must use `xpu-smi` rather than `nvidia-smi`. Require the new
-runtime to compare the `xpu-smi` count with the requested `gpuCount`. Also name
+enumeration must use sanitized `inspect_current_resources`. Require the new
+runtime to compare its device count with the requested `gpuCount`. Also name
 the official source example under `zj_examples/GPU-96G`, any minimally derived
 script, its parameter diff, and the VRAM budget. Explicitly prohibit
 from-scratch training or launcher code.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -117,12 +118,14 @@ def _cpu_info() -> dict[str, Any]:
 
 
 def _gpu_info() -> dict[str, Any]:
+    if shutil.which("xpu-smi") is not None:
+        return _gpu_info_from_xpu_smi()
     if shutil.which("nvidia-smi") is None:
         return {"available": False, "count": 0, "devices": []}
 
     command = [
         "nvidia-smi",
-        "--query-gpu=index,name,memory.total,memory.free,driver_version",
+        "--query-gpu=index,memory.total,memory.free",
         "--format=csv,noheader,nounits",
     ]
     try:
@@ -140,25 +143,129 @@ def _gpu_info() -> dict[str, Any]:
     devices = []
     for line in completed.stdout.splitlines():
         values = [item.strip() for item in line.split(",")]
-        if len(values) != 5:
+        if len(values) != 3:
             continue
-        index, name, total_mib, free_mib, driver = values
-        normalized_name = name.upper()
-        portal_gpu_type = None
-        if "V5000" in normalized_name:
-            portal_gpu_type = "V5000"
-        elif "V100" in normalized_name:
-            portal_gpu_type = "Z1120"
+        index, total_mib, free_mib = values
+        try:
+            total_gib = round(float(total_mib) / 1024, 3)
+            free_gib = round(float(free_mib) / 1024, 3)
+            index_value = int(index)
+        except ValueError:
+            continue
         devices.append(
             {
-                "index": int(index),
-                "name": name,
-                "portalGpuType": portal_gpu_type,
-                "totalMemoryGiB": round(float(total_mib) / 1024, 3),
-                "freeMemoryGiB": round(float(free_mib) / 1024, 3),
-                "driverVersion": driver,
+                "index": index_value,
+                "portalGpuType": "GPU-96G" if total_gib >= 64 else "GPU-32G",
+                "totalMemoryGiB": total_gib,
+                "freeMemoryGiB": free_gib,
             }
         )
+    return {"available": bool(devices), "count": len(devices), "devices": devices}
+
+
+def _memory_to_gib(value: str, unit: str) -> float:
+    amount = float(value)
+    normalized = unit.lower()
+    if normalized in {"gib", "gb"}:
+        return round(amount, 3)
+    if normalized in {"mib", "mb"}:
+        return round(amount / 1024, 3)
+    if normalized in {"kib", "kb"}:
+        return round(amount / (1024 * 1024), 3)
+    return round(amount / _GIB, 3)
+
+
+def _parse_xpu_smi_inventory(output: str) -> list[dict[str, Any]]:
+    attached_match = re.search(
+        r"Attached\s+(?:GPUs|XPUs|Devices)\s*:\s*(\d+)",
+        output,
+        re.IGNORECASE,
+    )
+    attached_count = int(attached_match.group(1)) if attached_match else 0
+
+    memory_pairs: list[tuple[float, float]] = []
+    in_device_memory = False
+    total_gib: float | None = None
+    free_gib: float | None = None
+
+    def finish_memory_section() -> None:
+        nonlocal total_gib, free_gib
+        if total_gib is not None and free_gib is not None:
+            memory_pairs.append((total_gib, free_gib))
+        total_gib = None
+        free_gib = None
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line == "Memory Usage":
+            if in_device_memory:
+                finish_memory_section()
+            in_device_memory = True
+            continue
+        if in_device_memory and (
+            line == "L3 Usage"
+            or line == "Utilization"
+            or line == "Temperature"
+            or line == "Clocks"
+            or line == "Processes"
+            or line.startswith("XPU ")
+        ):
+            finish_memory_section()
+            in_device_memory = False
+        if not in_device_memory:
+            continue
+        value_match = re.match(
+            r"(Total|Free)\s*:\s*([0-9.]+)\s*([KMGT]i?B)",
+            line,
+            re.IGNORECASE,
+        )
+        if value_match is None:
+            continue
+        value_gib = _memory_to_gib(value_match.group(2), value_match.group(3))
+        if value_match.group(1).lower() == "total":
+            total_gib = value_gib
+        else:
+            free_gib = value_gib
+    if in_device_memory:
+        finish_memory_section()
+
+    count = attached_count or len(memory_pairs)
+    devices = []
+    for index in range(count):
+        total, free = (
+            memory_pairs[index] if index < len(memory_pairs) else (None, None)
+        )
+        devices.append(
+            {
+                "index": index,
+                "portalGpuType": "GPU-96G",
+                "totalMemoryGiB": total,
+                "freeMemoryGiB": free,
+            }
+        )
+    return devices
+
+
+def _gpu_info_from_xpu_smi() -> dict[str, Any]:
+    command = [
+        "xpu-smi",
+        "-q",
+        "-d",
+        "MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS",
+    ]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, timeout=10, check=True
+        )
+    except (subprocess.SubprocessError, OSError):
+        return {
+            "available": False,
+            "count": 0,
+            "devices": [],
+            "error": "sanitized GPU inspection failed",
+        }
+
+    devices = _parse_xpu_smi_inventory(completed.stdout)
     return {"available": bool(devices), "count": len(devices), "devices": devices}
 
 

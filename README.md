@@ -61,9 +61,8 @@ users can see status and the old runtime can stop safely during migration.
 
 Callers keep a compatible, sufficient current GPU rather than switching to a
 more suitable cluster. Only when switching is necessary do they query the
-available-cluster tool, rank task-compatible clusters, and prefer one with
-enough reported cards,
-and use the best-suited cluster with queue confirmation when none has enough.
+available-cluster tool with the required GPU count, rank task-compatible
+clusters, prefer one whose derived capacitySufficient value is true, and use the best-suited cluster with queue confirmation when none has enough.
 Legacy name-only responses retain unknown-capacity behavior. Clusters absent from
 the result are forbidden. Portal creates a new Runtime session after a resource
 switch. The ensure request carries the current Claude Code `sessionId`,

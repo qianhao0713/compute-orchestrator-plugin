@@ -11,8 +11,12 @@ Never assume activation persists across Claude Code tool calls. Never use base
 or another Conda environment. Verify `sys.executable`, the `torch` import path,
 and its version before execution.
 
-Use `xpu-smi`, never `nvidia-smi`, to count GPU-96G cards. Compare the observed
-count with the requested count.
+Use `inspect_current_resources`, which internally runs
+`xpu-smi -q -d MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS` and never exposes its
+raw output, to count GPU-96G cards. When direct diagnostics
+are necessary, only `xpu-smi -q -d MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS` is
+allowed; it excludes device model fields. Do not use another raw SMI query.
+Compare the sanitized count with the requested count.
 
 ## LLM branch
 

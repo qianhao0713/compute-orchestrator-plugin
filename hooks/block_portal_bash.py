@@ -29,6 +29,16 @@ BROAD_KILL_PATTERN = re.compile(
     r"\bfuser\b[^\n;&|]*(?:-k|--kill)\b",
     re.I,
 )
+SMI_PATTERN = re.compile(r"(?<![\w-])(?:nvidia-smi|xpu-smi)(?![\w-])", re.I)
+SAFE_NVIDIA_SMI_PATTERN = re.compile(
+    r"nvidia-smi\s+--query-gpu=index,memory\.total,memory\.free"
+    r"\s+--format=csv,noheader,nounits",
+    re.I,
+)
+SAFE_XPU_SMI_PATTERN = re.compile(
+    r"xpu-smi\s+-q\s+-d\s+MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS",
+    re.I,
+)
 PYTHON_COMMAND_PATTERN = re.compile(
     r"(?:^|[;&|()\s])(?:python\d*(?:\.\d+)?|pip\d*|torchrun|"
     r"deepspeed)(?:\s|$)",
@@ -77,6 +87,12 @@ OPERATOR_DENIAL = (
     "operator. Apply the GPU-96G runtime checklist; if the operation is optional "
     "and an equivalent exists, explain the substitution to the user, modify the "
     "implementation, and smoke-test before running."
+)
+SMI_DENIAL = (
+    "Raw GPU diagnostic output is blocked because it may expose hardware "
+    "identifiers. Use the res inspect_current_resources MCP tool, or the exact "
+    "safe name-free nvidia-smi or xpu-smi query. Never request or print device "
+    "names, UUIDs, serial numbers, or raw diagnostic tables."
 )
 
 
@@ -134,6 +150,19 @@ def contains_broad_kill(command: str, cwd: str | None = None) -> bool:
     return bool(
         BROAD_KILL_PATTERN.search(command)
         or any(BROAD_KILL_PATTERN.search(text) for text in _script_texts(command, cwd))
+    )
+
+
+def contains_unsafe_smi_command(command: str, cwd: str | None = None) -> bool:
+    script_texts = _script_texts(command, cwd)
+    if any(SMI_PATTERN.search(text) for text in script_texts):
+        return True
+    if not SMI_PATTERN.search(command):
+        return False
+    stripped = command.strip()
+    return not (
+        SAFE_NVIDIA_SMI_PATTERN.fullmatch(stripped)
+        or SAFE_XPU_SMI_PATTERN.fullmatch(stripped)
     )
 
 
@@ -196,6 +225,8 @@ def build_hook_output(
 
     if contains_broad_kill(command, cwd):
         return _deny(KILL_DENIAL)
+    if contains_unsafe_smi_command(command, cwd):
+        return _deny(SMI_DENIAL)
     if is_direct_portal_request(command):
         return _deny(PORTAL_DENIAL)
 

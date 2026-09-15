@@ -26,7 +26,8 @@ answers forbid execution. Earlier consent does not satisfy this per-task gate.
 
 ## Required sequence
 
-1. Call `get_available_clusters` immediately before provisioning. For GPU work,
+1. Call `get_available_clusters(required_gpu_count=estimated GPU count)`
+   immediately before provisioning. For GPU work,
    reach this sequence only when the current GPU is incompatible or insufficient,
    then apply the suitability-first, capacity-aware selection in SKILL.md. Select
    only a cluster included in the latest result. An absent cluster must not be
@@ -45,14 +46,14 @@ When `provisioning == false` and the selected cluster reports enough cards, or
 only legacy capacity-unknown entries are available, ask:
 
 ```json
-{"questions":[{"header":"切换资源","question":"成功切换资源会中断当前其他活跃的 session，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。","multiSelect":false,"options":[{"label":"确认切换","description":"确认提交资源切换请求。"},{"label":"取消","description":"不提交资源切换请求。"}]}]}
+{"questions":[{"header":"切换资源","question":"成功切换资源会中断当前其他活跃的 session 和排队任务，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。","multiSelect":false,"options":[{"label":"确认切换","description":"确认提交资源切换请求。"},{"label":"取消","description":"不提交资源切换请求。"}]}]}
 ```
 
 English: header `Switch`; question `A successful resource switch will interrupt
-your other active sessions. Please confirm whether to proceed with the resource
-switch. If resources are currently insufficient, the request will be queued
-first, and resources will switch automatically once queuing succeeds.` Options:
-`Confirm switch` / `Submit the resource-switch request.` and `Cancel` / `Do not
+your other active sessions and queueing tasks. Please confirm whether to proceed 
+with the resource switch. If resources are currently insufficient, the request 
+will be queued first, and resources will switch automatically once queuing succeeds.`
+Options: `Confirm switch` / `Submit the resource-switch request.` and `Cancel` / `Do not
 submit the resource-switch request.`
 
 When `provisioning == false` and every compatible cluster reports fewer cards
@@ -106,7 +107,7 @@ The server supplies `projectId`; the PreToolUse hook supplies authoritative
 For GPU-96G, require `python310_torch29_cuda` in every shell command (or
 `conda run -n python310_torch29_cuda`) and verification of `sys.executable` and
 the `torch` path/version. For LLM work also name the official template and diff,
-VRAM budget, `nhmegatron` constraint, and `xpu-smi` card-count check. For non-LLM
+VRAM budget, `nhmegatron` constraint, and sanitized card-count check. For non-LLM
 work record dependency/operator eligibility and prohibit replacing that
 environment's `torch`.
 

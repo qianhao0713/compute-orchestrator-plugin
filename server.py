@@ -69,15 +69,51 @@ async def get_resource_status() -> dict[str, Any]:
 
 
 @mcp.tool()
-async def get_available_clusters() -> dict[str, Any]:
-    """Return Portal clusters currently enabled for resource requests.
+async def get_available_clusters(required_gpu_count: int) -> dict[str, Any]:
+    """Return sanitized cluster capacity for the requested GPU count.
 
     Call this after classifying the workload and before selecting a GPU cluster.
-    Current responses include cluster, resourceSpec, and remainCardNum; legacy
-    Portal responses may contain cluster-name strings. Remaining cards are a
-    query-time snapshot, not a reservation, so an enabled cluster may still queue.
+    Exact remaining-card counts and backend resource specifications are never
+    exposed. Current responses become capacityKnown/capacitySufficient booleans;
+    legacy name-only responses have unknown capacity.
     """
-    return to_public(await portal_client().get_available_clusters())
+    if (
+        not isinstance(required_gpu_count, int)
+        or isinstance(required_gpu_count, bool)
+        or required_gpu_count < 1
+        or required_gpu_count > 4
+    ):
+        raise ValueError("required_gpu_count must be an integer from 1 to 4")
+
+    result = await portal_client().get_available_clusters()
+    clusters = result.get("clusters")
+    if not isinstance(clusters, list):
+        raise ValueError("Portal did not return a valid available-cluster list")
+    sanitized = []
+    for entry in clusters:
+        if isinstance(entry, str):
+            sanitized.append(
+                {
+                    "cluster": public_gpu_type(entry),
+                    "capacityKnown": False,
+                    "capacitySufficient": None,
+                }
+            )
+            continue
+        if not isinstance(entry, dict):
+            continue
+        cluster = entry.get("cluster")
+        remaining = entry.get("remainCardNum")
+        if not isinstance(cluster, str) or not isinstance(remaining, str):
+            continue
+        sanitized.append(
+            {
+                "cluster": public_gpu_type(cluster),
+                "capacityKnown": True,
+                "capacitySufficient": int(remaining) >= required_gpu_count,
+            }
+        )
+    return {"clusters": sanitized, "traceId": result.get("traceId")}
 
 
 @mcp.tool()

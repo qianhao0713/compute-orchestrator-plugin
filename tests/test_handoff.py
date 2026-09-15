@@ -136,6 +136,67 @@ async def test_ensure_rejects_empty_message_when_handoff_enabled(
 
 
 @pytest.mark.asyncio
+async def test_available_clusters_hides_exact_capacity(monkeypatch):
+    client = _CapturingPortalClient(
+        clusters=[
+            {
+                "cluster": "V5000",
+                "resourceSpec": "internal-spec",
+                "remainCardNum": "3",
+            },
+            {
+                "cluster": "Z1120",
+                "resourceSpec": "internal-spec",
+                "remainCardNum": "1",
+            },
+        ]
+    )
+    monkeypatch.setattr(server, "portal_client", lambda: client)
+
+    result = await server.get_available_clusters(required_gpu_count=2)
+
+    assert result == {
+        "clusters": [
+            {
+                "cluster": "GPU-96G",
+                "capacityKnown": True,
+                "capacitySufficient": True,
+            },
+            {
+                "cluster": "GPU-32G",
+                "capacityKnown": True,
+                "capacitySufficient": False,
+            },
+        ],
+        "traceId": None,
+    }
+    assert "remainCardNum" not in str(result)
+    assert "resourceSpec" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_available_clusters_preserves_legacy_unknown_capacity(monkeypatch):
+    client = _CapturingPortalClient(clusters=["Z1120"])
+    monkeypatch.setattr(server, "portal_client", lambda: client)
+
+    result = await server.get_available_clusters(required_gpu_count=4)
+
+    assert result["clusters"] == [
+        {
+            "cluster": "GPU-32G",
+            "capacityKnown": False,
+            "capacitySufficient": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_available_clusters_rejects_invalid_required_count():
+    with pytest.raises(ValueError, match="required_gpu_count"):
+        await server.get_available_clusters(required_gpu_count=0)
+
+
+@pytest.mark.asyncio
 async def test_resource_status_exposes_handoff_setting(monkeypatch, tmp_path):
     client = _CapturingPortalClient()
     monkeypatch.setattr(
