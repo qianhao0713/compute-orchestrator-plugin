@@ -47,10 +47,10 @@ than requested or the conversation is long.
 
 Use only these public names and exact `(GPU, CPU, RAM GiB)` tiers:
 
-- GPU-32G: 32 GiB per GPU, architecture `sm70`, maximum 4 cards:
-  `(1,8,64)`, `(2,16,128)`, `(4,32,256)`.
-- GPU-96G: 96 GiB per GPU, maximum 4 cards:
-  `(1,16,112)`, `(2,32,225)`, `(4,64,450)`.
+- GPU-32G: 32 GiB per GPU, architecture `sm70`, maximum 8 cards:
+  `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, `(8,64,512)`.
+- GPU-96G: 96 GiB per GPU, maximum 8 cards:
+  `(1,16,112)`, `(2,32,225)`, `(4,64,450)`, `(8,128,900)`.
 - CPU-only: 1–32 CPU cores; request the smallest sufficient allocation.
 - `workerNum` is 1 unless Portal explicitly supports another value.
 
@@ -70,7 +70,8 @@ Immediately before resource expansion, call
 1. choose the most suitable compatible cluster if it has enough cards;
 2. otherwise choose the highest-ranked compatible cluster with enough cards;
 3. if none has enough cards, choose the most suitable compatible cluster and
-   use the fixed queue confirmation in Portal provisioning.
+   let Portal provisioning select the fixed queue confirmation from the fresh
+   `provisioning` state.
 
 A legacy string entry has unknown capacity, not zero capacity. A cluster absent
 from the latest result cannot be selected, submitted, waited for, polled, or
@@ -97,8 +98,10 @@ assume activation persists across tool calls.
 - Immediately before every `ensure_resource`, obtain fresh
   `get_resource_status` state and use the exact language-matched
   `AskUserQuestion` selected by Portal provisioning. Cancellation, free-form,
-  empty, multiple, unknown, or stale consent forbids submission. When
-  `provisioning == true`, always treat a proposed request as a different target.
+  empty, multiple, unknown, or stale consent forbids submission. Use the
+  queued-replacement question only when every available compatible cluster has
+  known insufficient capacity and `provisioning == true`; available or unknown
+  capacity uses the normal switch question even when a queued request exists.
 - Never supply `projectId`, `sessionId`, or `clientMessageId`. The server resolves
   the project and the hook injects the authoritative Claude Code session.
 - Follow `handoffEnabled` exactly: false means no continuation preparation and

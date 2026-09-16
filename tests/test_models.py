@@ -6,7 +6,7 @@ from models import EnsureResourceRequest, PendingRequest, ResourceSpec
 
 @pytest.mark.parametrize(
     ("gpu_count", "cpu", "memory_gib"),
-    [(1, 8, 64), (2, 16, 128), (4, 32, 256)],
+    [(1, 8, 64), (2, 16, 128), (4, 32, 256), (8, 64, 512)],
 )
 def test_z1120_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
     resource = ResourceSpec(
@@ -19,16 +19,16 @@ def test_z1120_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
     assert resource.gpu_type == "Z1120"
 
 
-def test_z1120_rejects_eight_gpus():
+def test_z1120_rejects_unsupported_gpu_count():
     with pytest.raises(
-        ValidationError, match="GPU-32G GPU count must be one of 1, 2, 4"
+        ValidationError, match="GPU-32G GPU count must be one of 1, 2, 4, 8"
     ):
         ResourceSpec(
             resourceType="GPU",
-            cpu=64,
-            memoryGiB=512,
+            cpu=24,
+            memoryGiB=192,
             gpuType="Z1120",
-            gpuCount=8,
+            gpuCount=3,
         )
 
 
@@ -41,7 +41,7 @@ def test_v100_display_name_is_rejected_as_backend_enum():
 
 @pytest.mark.parametrize(
     ("gpu_count", "cpu", "memory_gib"),
-    [(1, 16, 112), (2, 32, 225), (4, 64, 450)],
+    [(1, 16, 112), (2, 32, 225), (4, 64, 450), (8, 128, 900)],
 )
 def test_v5000_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
     resource = ResourceSpec(
@@ -54,16 +54,16 @@ def test_v5000_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
     assert resource.gpu_type == "V5000"
 
 
-def test_v5000_rejects_eight_gpus():
+def test_v5000_rejects_unsupported_gpu_count():
     with pytest.raises(
-        ValidationError, match="GPU-96G GPU count must be one of 1, 2, 4"
+        ValidationError, match="GPU-96G GPU count must be one of 1, 2, 4, 8"
     ):
         ResourceSpec(
             resourceType="GPU",
-            cpu=128,
-            memoryGiB=900,
+            cpu=48,
+            memoryGiB=338,
             gpuType="V5000",
-            gpuCount=8,
+            gpuCount=3,
         )
 
 

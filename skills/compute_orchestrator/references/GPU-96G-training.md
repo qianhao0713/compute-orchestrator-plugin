@@ -9,6 +9,7 @@ domestic-accelerator training framework. GPU-96G has 96 GiB VRAM per card and ac
 | 1 | 16 | 112 |
 | 2 | 32 | 225 |
 | 4 | 64 | 450 |
+| 8 | 128 | 900 |
 
 Send `resourceType: GPU`, `gpuType: GPU-96G`, and `workerNum: 1`. Select the
 smallest tuple that supports the documented example and parallel strategy.

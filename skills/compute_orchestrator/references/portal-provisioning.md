@@ -42,22 +42,24 @@ answers forbid execution. Earlier consent does not satisfy this per-task gate.
 5. On confirmation, call `ensure_resource` immediately. Do no further work in
    the old container after an accepted switch request.
 
-When `provisioning == false` and the selected cluster reports enough cards, or
-only legacy capacity-unknown entries are available, ask:
+When at least one compatible cluster reports enough cards, ask the following
+regardless of `provisioning`. Use the same question when legacy entries make
+capacity unknown; unknown capacity is not proof that every resource is
+insufficient:
 
 ```json
 {"questions":[{"header":"切换资源","question":"成功切换资源会中断当前其他活跃的 session 和排队任务，请确认是否执行切换资源操作？如果当前资源不足会先进行排队，排队成功后会自动切换资源。","multiSelect":false,"options":[{"label":"确认切换","description":"确认提交资源切换请求。"},{"label":"取消","description":"不提交资源切换请求。"}]}]}
 ```
 
 English: header `Switch`; question `A successful resource switch will interrupt
-your other active sessions and queueing tasks. Please confirm whether to proceed 
-with the resource switch. If resources are currently insufficient, the request 
-will be queued first, and resources will switch automatically once queuing succeeds.`
-Options: `Confirm switch` / `Submit the resource-switch request.` and `Cancel` / `Do not
-submit the resource-switch request.`
+your other active sessions and queued tasks. Please confirm whether to proceed
+with the resource switch. If resources are currently insufficient, the request
+will be queued first, and resources will switch automatically once queuing
+succeeds.` Options: `Confirm switch` / `Submit the resource-switch request.` and
+`Cancel` / `Do not submit the resource-switch request.`
 
-When `provisioning == false` and every compatible cluster reports fewer cards
-than the requested GPU count, ask:
+When every available compatible cluster has known capacity and reports fewer
+cards than the requested GPU count, and `provisioning == false`, ask:
 
 ```json
 {"questions":[{"header":"进入排队","question":"目前算力资源紧张，您的任务需要进入排队队列。排队成功后任务将立即启动执行，这可能会中断您其他正在运行的对话。请问您是否要进入排队。","multiSelect":false,"options":[{"label":"是的","description":"提交资源请求并进入排队队列。"},{"label":"取消","description":"不提交资源请求。"}]}]}
@@ -73,8 +75,8 @@ request.`
 `Yes` permits the immediate `ensure_resource` call. `Cancel`, Other/free-form,
 empty, multiple, or unknown answers forbid submission.
 
-When `provisioning == true`, treat the active request as a different target
-without comparing specifications, and ask:
+Only when every available compatible cluster has known capacity and reports
+fewer cards than the requested GPU count, and `provisioning == true`, ask:
 
 ```json
 {"questions":[{"header":"重新排队","question":"当前存在待排队任务, 若提交新的排队任务, 原排队任务将撤销，新任务重新排队，是否确认提交?","multiSelect":false,"options":[{"label":"确认提交","description":"撤销原排队任务，并提交新的排队任务。"},{"label":"取消","description":"保留原排队任务，不提交新请求。"}]}]}

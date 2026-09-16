@@ -179,7 +179,7 @@ async def test_available_clusters_preserves_legacy_unknown_capacity(monkeypatch)
     client = _CapturingPortalClient(clusters=["Z1120"])
     monkeypatch.setattr(server, "portal_client", lambda: client)
 
-    result = await server.get_available_clusters(required_gpu_count=4)
+    result = await server.get_available_clusters(required_gpu_count=8)
 
     assert result["clusters"] == [
         {
@@ -191,9 +191,14 @@ async def test_available_clusters_preserves_legacy_unknown_capacity(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_available_clusters_rejects_invalid_required_count():
+@pytest.mark.parametrize("required_gpu_count", [0, 9])
+async def test_available_clusters_rejects_invalid_required_count(
+    required_gpu_count,
+):
     with pytest.raises(ValueError, match="required_gpu_count"):
-        await server.get_available_clusters(required_gpu_count=0)
+        await server.get_available_clusters(
+            required_gpu_count=required_gpu_count
+        )
 
 
 @pytest.mark.asyncio

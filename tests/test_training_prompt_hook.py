@@ -11,7 +11,14 @@ def test_qwen3_sft_prompt_adds_mandatory_orchestration_route():
     context = _context("执行 Qwen3 SFT 训练")
     assert "Mandatory compute gate" in context
     assert "compute-orchestrator" in context
-    assert "Mandatory safety gates" in context
+    assert "non-negotiable safety rules" in context
+
+
+def test_resource_switch_question_uses_capacity_and_provisioning_matrix():
+    context = _context("使用GPU运行任务")
+    assert "queued-replacement question only when every compatible cluster" in context
+    assert "known insufficient capacity and provisioning is true" in context
+    assert "normal switch question even if provisioning is true" in context
 
 
 def test_generic_gpu_task_is_detected():

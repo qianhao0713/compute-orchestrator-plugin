@@ -31,10 +31,12 @@ resumes the task in the new Claude Code runtime.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
-`(1,8,64)`, `(2,16,128)`, or `(4,32,256)`, and must never exceed 4 cards.
+`(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`, and must never
+exceed 8 cards.
 GPU-96G resources are represented as `gpuType: "GPU-96G"`; each GPU has
 96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
-`(1,16,112)`, `(2,32,225)`, or `(4,64,450)` and must never exceed 4 cards.
+`(1,16,112)`, `(2,32,225)`, `(4,64,450)`, or `(8,128,900)` and must never
+exceed 8 cards.
 
 ## Files
 

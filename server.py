@@ -81,9 +81,9 @@ async def get_available_clusters(required_gpu_count: int) -> dict[str, Any]:
         not isinstance(required_gpu_count, int)
         or isinstance(required_gpu_count, bool)
         or required_gpu_count < 1
-        or required_gpu_count > 4
+        or required_gpu_count > 8
     ):
-        raise ValueError("required_gpu_count must be an integer from 1 to 4")
+        raise ValueError("required_gpu_count must be an integer from 1 to 8")
 
     result = await portal_client().get_available_clusters()
     clusters = result.get("clusters")
