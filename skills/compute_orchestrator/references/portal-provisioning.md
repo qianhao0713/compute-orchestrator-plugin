@@ -1,28 +1,10 @@
 # Portal provisioning
 
-Read this file only when current resources are insufficient or a Portal
-operation is already active.
-
-## Existing queued request while current resources suffice
-
-Before the first smoke test or workload command for the submitted task, if
-`get_resource_status.provisioning == true` and current resources suffice, execute
-this fixed `AskUserQuestion` in the language used by the user:
-
-```json
-{"questions":[{"header":"运行任务","question":"当前分配资源能够运行新提交的任务。目前存在排队任务，排队成功后会自动切换资源暂停当时正在运行的其他任务，是否继续提交任务。","multiSelect":false,"options":[{"label":"继续","description":"继续提交并运行当前任务。"},{"label":"取消","description":"不提交当前任务。"}]}]}
-```
-
-English: header `Run task`; question `The currently allocated resources can run
-the newly submitted task. There are queued tasks. Once queued successfully,
-resources will be automatically switched, suspending other running tasks. Do you
-want to proceed with task submission?` Options: `Continue` / `Submit and run the
-current task.` and `Cancel` / `Do not submit the current task.`
-
-`Continue` authorizes this submitted task and directly allows its smoke test and
-workload commands. Do not poll, call `ensure_resource`, cancel, or replace the
-existing queued request. `Cancel`, Other/free-form, empty, multiple, or unknown
-answers forbid execution. Earlier consent does not satisfy this per-task gate.
+Read this file only when current resources are insufficient and a resource
+switch may be needed. If current resources suffice, execute the submitted task
+without an `AskUserQuestion`, regardless of `get_resource_status.provisioning`.
+Do not poll, cancel, replace, or call `ensure_resource` for any existing queued
+request in that branch.
 
 ## Required sequence
 

@@ -26,10 +26,9 @@ than requested or the conversation is long.
 3. Before every smoke test or workload launch, call `get_resource_status`.
    Missing or non-boolean `provisioning` fails closed.
 4. If current resources suffice, keep the current compatible GPU cluster even
-   if another is more suitable. When `provisioning == false`, execute normally.
-   When it is true, read [Portal provisioning](references/portal-provisioning.md),
-   issue its fixed existing-queue `AskUserQuestion`, and execute only after
-   `Continue`; never call `ensure_resource` in this branch.
+   if another is more suitable and execute normally regardless of
+   `provisioning`. Do not poll, cancel, replace, or call `ensure_resource` for
+   an existing queued request in this branch.
 5. If resources are insufficient, complete resource-independent preparation
    first and persist reusable artifacts on stable storage. Do not install
    dependencies before switching.

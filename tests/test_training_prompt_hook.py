@@ -21,6 +21,12 @@ def test_resource_switch_question_uses_capacity_and_provisioning_matrix():
     assert "normal switch question even if provisioning is true" in context
 
 
+def test_sufficient_resources_do_not_require_existing_queue_confirmation():
+    context = _context("使用GPU运行任务")
+    assert "run the task without a question regardless of provisioning" in context
+    assert "fixed existing-queue question" not in context
+
+
 def test_generic_gpu_task_is_detected():
     assert build_hook_output({"prompt": "请用GPU执行这个计算任务"}) is not None
 
