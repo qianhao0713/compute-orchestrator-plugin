@@ -201,8 +201,11 @@ def _deny(message: str) -> dict[str, Any]:
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-        },
-        "systemMessage": message,
+            # Claude Code returns this field to Claude after a denied
+            # PreToolUse call. A top-level systemMessage is user-facing and is
+            # not the recovery channel for the agent.
+            "permissionDecisionReason": message,
+        }
     }
 
 
