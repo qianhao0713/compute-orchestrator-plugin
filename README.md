@@ -34,9 +34,10 @@ GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`, and must never
 exceed 8 cards.
 GPU-96G resources are represented as `gpuType: "GPU-96G"`; each GPU has
-96 GiB VRAM. Requests are limited to `(GPU, CPU, RAM GiB)` tuples
-`(1,16,112)`, `(2,32,225)`, `(4,64,450)`, or `(8,128,900)` and must never
-exceed 8 cards.
+96 GiB VRAM. Requests must use the single `(GPU, CPU, RAM GiB)` tuple
+`(8,128,900)`; 1-, 2-, and 4-card requests are rejected. This tier is selected
+only for tasks that genuinely require 8 GPUs, or as a fallback when every other
+compatible GPU cluster is confirmed to have no available cards.
 
 ## Files
 

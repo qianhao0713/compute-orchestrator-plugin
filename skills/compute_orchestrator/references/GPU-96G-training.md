@@ -2,17 +2,18 @@
 
 Use this path only for training supported Qwen, Llama, and DeepSeek families.
 GPU-96G is a domestic accelerator cluster, and `nhmegatron` is its
-domestic-accelerator training framework. GPU-96G has 96 GiB VRAM per card and accepts only these exact Portal tuples:
+domestic-accelerator training framework. GPU-96G has 96 GiB VRAM per card and
+accepts only this exact Portal tuple:
 
 | GPUs | CPU | RAM GiB |
 | ---: | ---: | ---: |
-| 1 | 16 | 112 |
-| 2 | 32 | 225 |
-| 4 | 64 | 450 |
 | 8 | 128 | 900 |
 
 Send `resourceType: GPU`, `gpuType: GPU-96G`, and `workerNum: 1`. Select the
-smallest tuple that supports the documented example and parallel strategy.
+8-GPU tuple only when the task genuinely requires 8 GPUs or every other
+compatible GPU cluster is confirmed to have no available cards. Do not use
+GPU-96G merely to over-allocate a 1-, 2-, or 4-GPU task while another compatible
+GPU cluster still has any cards.
 
 After migration to GPU-96G, use `inspect_current_resources` to enumerate and
 count cards without exposing physical device names. The inspector runs only

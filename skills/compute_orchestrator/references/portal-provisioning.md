@@ -14,7 +14,10 @@ request in that branch.
    then apply the suitability-first, capacity-aware selection in SKILL.md. Select
    only a cluster included in the latest result. An absent cluster must not be
    selected, submitted, waited for, polled, or queued until a later explicit
-   availability call includes it.
+   availability call includes it. Apply the GPU-96G eligibility gate before
+   comparing sufficient capacity: it is an 8-GPU-only resource and is eligible
+   for a smaller task only when every other compatible cluster is absent or has
+   known zero availability. Unknown availability does not satisfy that fallback.
 2. Finish resource-independent preparation in the current container. Do not
    install dependencies there. Persist reusable artifacts on stable storage.
 3. Call `get_resource_status`; its top-level boolean `provisioning` is
@@ -24,7 +27,7 @@ request in that branch.
 5. On confirmation, call `ensure_resource` immediately. Do no further work in
    the old container after an accepted switch request.
 
-When at least one compatible cluster reports enough cards, ask the following
+When at least one eligible compatible cluster reports enough cards, ask the following
 regardless of `provisioning`. Use the same question when legacy entries make
 capacity unknown; unknown capacity is not proof that every resource is
 insufficient:
@@ -40,7 +43,7 @@ will be queued first, and resources will switch automatically once queuing
 succeeds.` Options: `Confirm switch` / `Submit the resource-switch request.` and
 `Cancel` / `Do not submit the resource-switch request.`
 
-When every available compatible cluster has known capacity and reports fewer
+When every eligible available compatible cluster has known capacity and reports fewer
 cards than the requested GPU count, and `provisioning == false`, ask:
 
 ```json
@@ -57,7 +60,7 @@ request.`
 `Yes` permits the immediate `ensure_resource` call. `Cancel`, Other/free-form,
 empty, multiple, or unknown answers forbid submission.
 
-Only when every available compatible cluster has known capacity and reports
+Only when every eligible available compatible cluster has known capacity and reports
 fewer cards than the requested GPU count, and `provisioning == true`, ask:
 
 ```json

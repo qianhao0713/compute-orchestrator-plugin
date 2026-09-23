@@ -74,8 +74,9 @@ async def get_available_clusters(required_gpu_count: int) -> dict[str, Any]:
 
     Call this after classifying the workload and before selecting a GPU cluster.
     Exact remaining-card counts and backend resource specifications are never
-    exposed. Current responses become capacityKnown/capacitySufficient booleans;
-    legacy name-only responses have unknown capacity.
+    exposed. Current responses become capacityKnown/capacityAvailable/
+    capacitySufficient booleans; legacy name-only responses have unknown
+    capacity.
     """
     if (
         not isinstance(required_gpu_count, int)
@@ -96,6 +97,7 @@ async def get_available_clusters(required_gpu_count: int) -> dict[str, Any]:
                 {
                     "cluster": public_gpu_type(entry),
                     "capacityKnown": False,
+                    "capacityAvailable": None,
                     "capacitySufficient": None,
                 }
             )
@@ -110,6 +112,7 @@ async def get_available_clusters(required_gpu_count: int) -> dict[str, Any]:
             {
                 "cluster": public_gpu_type(cluster),
                 "capacityKnown": True,
+                "capacityAvailable": int(remaining) > 0,
                 "capacitySufficient": int(remaining) >= required_gpu_count,
             }
         )

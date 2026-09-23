@@ -48,8 +48,8 @@ Use only these public names and exact `(GPU, CPU, RAM GiB)` tiers:
 
 - GPU-32G: 32 GiB per GPU, architecture `sm70`, maximum 8 cards:
   `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, `(8,64,512)`.
-- GPU-96G: 96 GiB per GPU, maximum 8 cards:
-  `(1,16,112)`, `(2,32,225)`, `(4,64,450)`, `(8,128,900)`.
+- GPU-96G: 96 GiB per GPU, exactly 8 cards: `(8,128,900)`. Requests for
+  1, 2, or 4 cards are invalid.
 - CPU-only: 1–32 CPU cores; request the smallest sufficient allocation.
 - `workerNum` is 1 unless Portal explicitly supports another value.
 
@@ -64,13 +64,21 @@ support, operators, architecture, VRAM, and smallest sufficient tier.
 
 Immediately before resource expansion, call
 `get_available_clusters(required_gpu_count=estimated GPU count)` and use only
-`capacityKnown` and `capacitySufficient`:
+`capacityKnown`, `capacityAvailable`, and `capacitySufficient`:
 
-1. choose the most suitable compatible cluster if it has enough cards;
-2. otherwise choose the highest-ranked compatible cluster with enough cards;
-3. if none has enough cards, choose the most suitable compatible cluster and
-   let Portal provisioning select the fixed queue confirmation from the fresh
-   `provisioning` state.
+1. GPU-96G is eligible only when the task genuinely requires 8 GPUs, or every
+   other compatible GPU cluster in the latest result is either absent or has
+   `capacityKnown == true` and `capacityAvailable == false`. Unknown capacity
+   does not prove that a cluster has no cards. Never request 8 GPU-96G cards
+   merely to run a task estimated for 1, 2, or 4 cards while another compatible
+   GPU cluster still has any cards.
+2. among eligible clusters, choose the most suitable compatible cluster if it
+   has enough cards;
+3. otherwise choose the highest-ranked eligible compatible cluster with enough
+   cards;
+4. if none has enough cards, choose the most suitable eligible compatible
+   cluster and let Portal provisioning select the fixed queue confirmation from
+   the fresh `provisioning` state.
 
 A legacy string entry has unknown capacity, not zero capacity. A cluster absent
 from the latest result cannot be selected, submitted, waited for, polled, or
