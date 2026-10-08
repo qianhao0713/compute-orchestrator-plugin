@@ -1,7 +1,7 @@
 # Compute Orchestrator Claude Code Plugin
 
 This plugin evaluates scientific workloads, prepares reusable data dependencies
-in the current CPU container, requests CPU, GPU-32G, or GPU-96G resources through Portal, and
+in the current CPU container, requests CPU, GPU-32G, GPU-40G, or GPU-96G resources through Portal, and
 resumes the task in the new Claude Code runtime.
 
 ## Core lifecycle
@@ -32,6 +32,9 @@ resumes the task in the new Claude Code runtime.
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`, and must never
+exceed 8 cards.
+GPU-40G requests use fixed `(GPU, CPU, RAM GiB)` tuples:
+`(1,8,100)`, `(2,16,200)`, `(4,32,400)`, or `(8,64,800)`, and must never
 exceed 8 cards.
 GPU-96G resources are represented as `gpuType: "GPU-96G"`; each GPU has
 96 GiB VRAM. Requests must use the single `(GPU, CPU, RAM GiB)` tuple

@@ -22,5 +22,7 @@ state. Data parallelism duplicates model state. Verify multi-GPU support before
 requesting more than one GPU.
 
 GPU-32G uses 32 GiB per GPU and architecture `sm70`; verify compiled kernels and
-dependencies support it. For GPU-96G keep planned peak comfortably below 96 GiB
-per card and run a bounded smoke test before full execution.
+dependencies support it. GPU-40G uses 40 GiB per GPU and architecture `sm80`;
+apply the same CUDA compatibility checks. For GPU-96G keep planned peak
+comfortably below 96 GiB per card and run a bounded smoke test before full
+execution.

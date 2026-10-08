@@ -145,9 +145,9 @@ async def ensure_resource(
     and the server sends pendingRequest.message as an empty string. When true,
     pending_message must be non-empty.
 
-    Use gpu_type='GPU-32G' for the 32 GiB CUDA cluster or 'GPU-96G' for the
-    96 GiB domestic-accelerator cluster. On a network timeout, call again with
-    exactly the same request ID and pending request content.
+    Use gpu_type='GPU-32G' or 'GPU-40G' for the corresponding CUDA cluster, or
+    'GPU-96G' for the domestic-accelerator cluster. On a network timeout, call
+    again with exactly the same request ID and pending request content.
     """
     current_settings = settings()
     if current_settings.enable_handoff and not pending_message.strip():

@@ -7,16 +7,20 @@ from typing import Any
 
 
 PUBLIC_GPU_32G = "GPU-32G"
+PUBLIC_GPU_40G = "GPU-40G"
 PUBLIC_GPU_96G = "GPU-96G"
 _BACKEND_GPU_32G = "Z1120"
+_BACKEND_GPU_40G = "Z3200"
 _BACKEND_GPU_96G = "V5000"
 
 _PUBLIC_TO_BACKEND = {
     PUBLIC_GPU_32G.lower(): _BACKEND_GPU_32G,
+    PUBLIC_GPU_40G.lower(): _BACKEND_GPU_40G,
     PUBLIC_GPU_96G.lower(): _BACKEND_GPU_96G,
 }
 _BACKEND_TO_PUBLIC = {
     _BACKEND_GPU_32G.lower(): PUBLIC_GPU_32G,
+    _BACKEND_GPU_40G.lower(): PUBLIC_GPU_40G,
     _BACKEND_GPU_96G.lower(): PUBLIC_GPU_96G,
 }
 _BACKEND_PATTERN = re.compile(
@@ -30,7 +34,7 @@ def to_backend_gpu_type(value: str | None) -> str | None:
         return None
     backend = _PUBLIC_TO_BACKEND.get(value.strip().lower())
     if backend is None:
-        raise ValueError("gpu_type must be 'GPU-32G' or 'GPU-96G'")
+        raise ValueError("gpu_type must be 'GPU-32G', 'GPU-40G', or 'GPU-96G'")
     return backend
 
 

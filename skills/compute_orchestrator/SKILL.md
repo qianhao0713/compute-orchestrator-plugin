@@ -48,6 +48,8 @@ Use only these public names and exact `(GPU, CPU, RAM GiB)` tiers:
 
 - GPU-32G: 32 GiB per GPU, architecture `sm70`, maximum 8 cards:
   `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, `(8,64,512)`.
+- GPU-40G: 40 GiB per GPU, architecture `sm80`, maximum 8 cards:
+  `(1,8,100)`, `(2,16,200)`, `(4,32,400)`, `(8,64,800)`.
 - GPU-96G: 96 GiB per GPU, exactly 8 cards: `(8,128,900)`. Requests for
   1, 2, or 4 cards are invalid.
 - CPU-only: 1–32 CPU cores; request the smallest sufficient allocation.
@@ -128,12 +130,13 @@ assume activation persists across tool calls.
 
 ## User-visible privacy
 
-In every plan, prompt, tool argument, status, and error, use only GPU-32G and
-GPU-96G. Never disclose a vendor, chip family, physical product/device name,
-backend identifier, UUID, serial number, or legacy template directory name.
+In every plan, prompt, tool argument, status, and error, use only GPU-32G,
+GPU-40G, and GPU-96G. Never disclose a vendor, chip family, physical
+product/device name, backend identifier, UUID, serial number, or legacy template
+directory name.
 
 Never expose raw SMI output. Prefer `inspect_current_resources`. A direct
-GPU-32G query is allowed only as
+GPU-32G or GPU-40G query is allowed only as
 `nvidia-smi --query-gpu=index,memory.total,memory.free --format=csv,noheader,nounits`.
 A direct GPU-96G query is allowed only as
 `xpu-smi -q -d MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS`. Do not request or

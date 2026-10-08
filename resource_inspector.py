@@ -155,7 +155,13 @@ def _gpu_info() -> dict[str, Any]:
         devices.append(
             {
                 "index": index_value,
-                "portalGpuType": "GPU-96G" if total_gib >= 64 else "GPU-32G",
+                "portalGpuType": (
+                    "GPU-96G"
+                    if total_gib >= 64
+                    else "GPU-40G"
+                    if total_gib >= 36
+                    else "GPU-32G"
+                ),
                 "totalMemoryGiB": total_gib,
                 "freeMemoryGiB": free_gib,
             }
