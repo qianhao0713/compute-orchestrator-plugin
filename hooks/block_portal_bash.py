@@ -15,6 +15,9 @@ from typing import Any
 
 GPU_96G_ENV = "python310_torch29_cuda"
 PORTAL_PATH_PATTERN = re.compile(r"/scientist/deployment(?:/|\b)", re.I)
+K8S_JOB_PATH_PATTERN = re.compile(
+    r"/scientist/project/[^/]+/jobs(?:/|\b)", re.I
+)
 NETWORK_CLIENT_PATTERN = re.compile(
     r"(?:^|[;&|()\s])(?:curl|wget|http|https)(?:\s|$)|"
     r"\b(?:requests|httpx|aiohttp)\s*\.\s*"
@@ -67,9 +70,10 @@ CONDA_ACTIVATE_PATTERN = re.compile(
     re.I,
 )
 PORTAL_DENIAL = (
-    "Direct Portal requests from Bash are forbidden. Use the compute-orchestrator "
-    "MCP tools so URL normalization, validation, session injection, availability "
-    "checks, and request logging are preserved."
+    "Direct Portal or K8s job requests from Bash are forbidden. Use the "
+    "compute-orchestrator MCP tools (ensure_resource, submit_k8s_job, "
+    "get_k8s_job_details, etc.) so URL normalization, validation, session "
+    "injection, availability checks, and request logging are preserved."
 )
 KILL_DENIAL = (
     "Broad process-killing commands are forbidden because they can terminate "
@@ -109,6 +113,7 @@ def is_direct_portal_request(command: str) -> bool:
         return False
     return bool(
         PORTAL_PATH_PATTERN.search(command)
+        or K8S_JOB_PATH_PATTERN.search(command)
         or any(marker in command for marker in _portal_markers())
     )
 

@@ -1,13 +1,13 @@
 ---
 name: compute-orchestrator
 description: >
-  Mandatory resource planning and provisioning for any GPU-related or
-  compute-intensive task, including inferred GPU use. Use for GPU, CUDA, VRAM,
-  inference, training, torchrun, NCCL, multi-GPU, Qwen, Llama, DeepSeek, SFT,
-  LoRA, pretraining, Megatron, DeepSpeed, paper reproduction, large preprocessing,
-  or substantial CPU/RAM work,
-  resource failures, or OOM. Load before setup, installation, smoke tests,
-  launchers, or workload commands.
+  Mandatory resource planning and provisioning for any GPU-related,
+  compute-intensive, or distributable CPU task, including inferred GPU use and
+  multi-node CPU sharding. Use for GPU, CUDA, VRAM, inference, training,
+  torchrun, NCCL, multi-GPU, Qwen, Llama, DeepSeek, SFT, LoRA, pretraining,
+  Megatron, DeepSpeed, paper reproduction, large preprocessing, or substantial
+  CPU/RAM work, K8s distributed CPU jobs, resource failures, or OOM. Load before
+  setup, installation, smoke tests, launchers, or workload commands.
 ---
 
 # Compute Orchestrator
@@ -102,6 +102,76 @@ assume activation persists across tool calls.
   that environment's existing `torch` without another GPU runtime, backend,
   implementation, or binary extension. Apply the runtime operator checklist.
 
+## K8s distributed CPU jobs
+
+When a task is CPU-only, independently shardable across workers (no collective
+communication such as reduce, gather, scatter), and any of these apply:
+
+- Single-machine resources are insufficient for the workload.
+- The total computation is large enough to benefit from parallelism.
+- The user explicitly requests distributed execution.
+
+then submit it as a K8s Indexed Job instead of running locally.
+
+### Required K8s workflow
+
+1. Inspect the code and inputs. Confirm the task can be split by
+   `JOB_COMPLETION_INDEX` into independent shards with no inter-shard
+   communication. If not, this workflow does not apply.
+2. Call `get_k8s_resources` to query per-node available CPU cores and memory.
+   This is a request-capacity estimate, not real-time usage.
+3. Estimate per-worker CPU and memory from the code and inputs. Choose values
+   within the cluster's available capacity.
+4. Choose `shard_count` (total shards) and `parallelism` (max concurrent
+   workers). parallelism must not exceed shard_count. Keep both as small as
+   the workload allows.
+5. Select the container image. Prefer a Portal preset (`execution_profile`);
+   otherwise specify `image` that the K8s cluster can pull. When no suitable
+   image exists, install dependencies into a directory via conda before the
+   main command, and adjust paths or code as needed.
+6. Ensure all inputs and outputs are on the shared NAS mount. Inside the
+   container, the shared PVC is at `/mnt/nas`. Both the Claude Code container
+   and the K8s workers see the same directory. If paths are not already on the
+   shared mount, adjust them to `/mnt/nas/...`.
+7. Generate a unique output directory under the shared mount for this job.
+8. Confirm with the user using this exact template:
+   > 将向 K8s 提交 CPU 分布式任务：共 N 个分片，最大并发 M，每个 worker 使用
+   > X 核 CPU 和 Y GiB 内存。该操作不会切换或中断当前 Claude Code 会话。
+   > 是否确认提交？
+   >
+   > 确认提交 / 取消
+9. Call `submit_k8s_job` with the chosen parameters. Save `jobId` from the
+   response. On timeout, retry with the same `request_id` and identical
+   parameters.
+10. Poll `get_k8s_job_details` by `jobId` every 15-30 seconds. Monitor `state`,
+    `succeededIndexesCount/total`, `runningPods`, and `reasonCode`. A task is
+    fully done when state is SUCCEEDED/FAILED/CANCELLED and
+    `resourcesReleased` is true.
+11. For diagnostics, use `get_k8s_job_attempts` to locate a specific shard's
+    `podUid`, then `get_k8s_job_logs` with `attemptId` to read its log.
+12. To cancel, call `cancel_k8s_job` and continue polling until
+    CANCELLED + resourcesReleased=true.
+
+### K8s safety rules
+
+- Only CPU tasks with independent shards. No collective communication
+  (reduce, gather, scatter, all-reduce). No GPU work.
+- `request_id` is the idempotency key. On timeout, retry with the same ID.
+  Never generate a new one for the same task.
+- Business success requires envelope `code == "00000"`; HTTP 200 alone is
+  insufficient. Preserve `traceId`.
+- Never supply `projectId` or `sessionId`. The server resolves the project
+  from configuration.
+- All I/O paths must be on the shared NAS (`/mnt/nas` inside the container).
+  The script is responsible for reading inputs and organizing outputs.
+- env keys must not include reserved names: JOB_ID, POD_UID,
+  JOB_COMPLETION_INDEX. Values must be strings.
+- Do not use `isVip` unless the user is explicitly in the VIP whitelist.
+- `shard_count` max 5000, `parallelism` max 64, per-worker CPU max 32, memory
+  max 128 GiB.
+- Never access K8s Portal APIs directly with Bash, curl, wget, or HTTP
+  libraries. Use only the MCP tools.
+
 ## Non-negotiable safety
 
 - Immediately before every `ensure_resource`, obtain fresh
@@ -148,7 +218,14 @@ the notice, substitution, and user-decision rules in GPU-96G runtime.
 
 ## MCP boundary
 
-Use only `inspect_current_resources`, `get_available_clusters`,
-`get_resource_status`, `ensure_resource`, `persist_handoff`, and
-`verify_persistent_artifacts` for resource operations. Never access Portal
-directly with Bash, curl, wget, or a generic HTTP library.
+Use only the following MCP tools for resource operations:
+
+- Single-machine: `inspect_current_resources`, `get_resource_status`,
+  `ensure_resource`, `persist_handoff`, `verify_persistent_artifacts`.
+- GPU cluster selection: `get_available_clusters`.
+- K8s distributed CPU: `get_k8s_resources`, `submit_k8s_job`,
+  `get_k8s_job_details`, `list_k8s_jobs`, `get_k8s_job_attempts`,
+  `get_k8s_job_logs`, `cancel_k8s_job`.
+
+Never access Portal or K8s APIs directly with Bash, curl, wget, or a generic
+HTTP library.
