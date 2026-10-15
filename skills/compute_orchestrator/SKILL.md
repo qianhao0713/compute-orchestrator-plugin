@@ -5,7 +5,8 @@ description: >
   compute-intensive task, including inferred GPU use. Use for GPU, CUDA, VRAM,
   inference, training, torchrun, NCCL, multi-GPU, Qwen, Llama, DeepSeek, SFT,
   LoRA, pretraining, Megatron, DeepSpeed, paper reproduction, large preprocessing,
-  or substantial CPU/RAM work,
+  distributed CPU, multi-worker, parameter sweep, grid search, Indexed Job,
+  batch/sharded processing, or substantial CPU/RAM work,
   resource failures, or OOM. Load before setup, installation, smoke tests,
   launchers, or workload commands.
 ---
@@ -21,6 +22,11 @@ than requested or the conversation is long.
 1. Inspect the executable code/configuration and inputs. Classify the actual
    path as CPU or GPU. Read [resource estimation](references/resource-estimation.md)
    and estimate CPU, RAM, GPU count, and VRAM.
+   For independently shardable CPU work that needs multiple workers, or when
+   the user explicitly requests distributed CPU execution, read
+   [K8s CPU jobs](references/k8s-cpu-jobs.md) and follow that flow instead of
+   container resource switching. Do not continue with steps 2–8 for that
+   branch. Cross-worker collectives are unsupported.
 2. Call `inspect_current_resources`. Compare the estimate with effective
    container resources, never host resources.
 3. Before every smoke test or workload launch, call `get_resource_status`.
@@ -52,7 +58,11 @@ Use only these public names and exact `(GPU, CPU, RAM GiB)` tiers:
   `(1,8,100)`, `(2,16,200)`, `(4,32,400)`, `(8,64,800)`.
 - GPU-96G: 96 GiB per GPU, exactly 8 cards: `(8,128,900)`. Requests for
   1, 2, or 4 cards are invalid.
-- CPU-only: 1–32 CPU cores; request the smallest sufficient allocation.
+- Interactive CPU-only: use the effective container resources when sufficient;
+  otherwise request the smallest sufficient allocation from 1–32 CPU cores.
+- K8s CPU jobs: independently shardable CPU-only work, submitted asynchronously
+  without switching the Claude Code container; use the per-worker limits and
+  workflow in [K8s CPU jobs](references/k8s-cpu-jobs.md).
 - `workerNum` is 1 unless Portal explicitly supports another value.
 
 Never invent a GPU type, count, or tuple or request more resources merely for
@@ -127,6 +137,14 @@ assume activation persists across tool calls.
   kill with a training-only pattern such as
   `pkill -9 -f "torchrun\|pretrain_v\|xmegatron_ext"`, verify, and run only the
   derived copy.
+- Before every K8s CPU submission, run `prepare_cpu_job`, then
+  `estimate_cpu_job_capacity`, show the exact language-matched fixed submission
+  confirmation from [K8s CPU jobs](references/k8s-cpu-jobs.md), and submit only
+  after affirmative consent. Preparation must verify scripts, shard-index
+  adaptation, and every referenced input/output path under
+  `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. Never submit unsupported collective or
+  inter-worker communication code. Cancellation also requires its fixed
+  confirmation.
 
 ## User-visible privacy
 
@@ -149,6 +167,9 @@ the notice, substitution, and user-decision rules in GPU-96G runtime.
 ## MCP boundary
 
 Use only `inspect_current_resources`, `get_available_clusters`,
-`get_resource_status`, `ensure_resource`, `persist_handoff`, and
-`verify_persistent_artifacts` for resource operations. Never access Portal
+`get_resource_status`, `ensure_resource`, `persist_handoff`,
+`verify_persistent_artifacts`, `prepare_cpu_job`,
+`estimate_cpu_job_capacity`, `submit_cpu_job`, `get_cpu_job`,
+`list_cpu_jobs`, `cancel_cpu_job`, `get_cpu_job_attempts`, and
+`get_cpu_job_logs` for resource and K8s job operations. Never access Portal
 directly with Bash, curl, wget, or a generic HTTP library.

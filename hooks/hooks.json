@@ -1,5 +1,5 @@
 {
-  "description": "Require resource classification for every task and route GPU work through compute orchestration.",
+  "description": "Require resource classification and route GPU or distributed CPU work through compute orchestration.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -24,7 +24,7 @@
         ]
       },
       {
-        "matcher": "mcp__(plugin_compute-orchestrator_res|res)__ensure_resource",
+        "matcher": "mcp__(plugin_compute-orchestrator_res|res)__(ensure_resource|submit_cpu_job)",
         "hooks": [
           {
             "type": "command",

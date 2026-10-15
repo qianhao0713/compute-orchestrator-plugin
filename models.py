@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -83,6 +84,87 @@ class ResourceSpec(BaseModel):
                     "(gpuCount, cpu, memoryGiB) specification "
                     f"({self.gpu_count}, {expected_cpu}, {expected_memory})"
                 )
+        return self
+
+
+CPU_JOB_RESERVED_ENV = {"JOB_ID", "POD_UID", "JOB_COMPLETION_INDEX"}
+CPU_JOB_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+CPU_JOB_SECRET_ENV_PATTERN = re.compile(
+    r"(?:^|_)(?:ACCESS_?TOKEN|REFRESH_?TOKEN|TOKEN|SECRET|PASSWORD|PASSWD|"
+    r"API_?KEY|CREDENTIALS?|COOKIE|AUTHORIZATION)(?:_|$)",
+    re.I,
+)
+
+
+class CpuJobSubmitRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    request_id: str = Field(alias="requestId", min_length=1, max_length=64)
+    session_id: str = Field(alias="sessionId", min_length=1, max_length=128)
+    execution_profile: str | None = Field(
+        default=None, alias="executionProfile", max_length=64
+    )
+    is_vip: bool = Field(default=False, alias="isVip")
+    image: str | None = Field(default=None, max_length=512)
+    command: list[str] = Field(min_length=1, max_length=64)
+    args: list[str] = Field(default_factory=list, max_length=256)
+    shard_count: int = Field(default=1, alias="shardCount", ge=1, le=5000)
+    parallelism: int = Field(default=1, ge=1, le=64)
+    cpu: int = Field(default=1, ge=1, le=32)
+    memory_gib: int = Field(default=4, alias="memoryGiB", ge=1, le=128)
+    ephemeral_storage_gib: int = Field(
+        default=2, alias="ephemeralStorageGiB", ge=1, le=20
+    )
+    job_backoff_limit: int = Field(
+        default=6, alias="jobBackoffLimit", ge=0, le=20
+    )
+    active_deadline_seconds: int = Field(
+        default=21600, alias="activeDeadlineSeconds", ge=1, le=172800
+    )
+    description: str | None = Field(default=None, max_length=1024)
+    env: dict[str, str] = Field(default_factory=dict, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_cpu_job(self) -> "CpuJobSubmitRequest":
+        if self.is_vip:
+            raise ValueError(
+                "VIP CPU jobs are not accepted by this plugin because stable-path "
+                "visibility cannot be verified"
+            )
+        if self.execution_profile is not None and not self.execution_profile.strip():
+            raise ValueError("executionProfile must be omitted or non-blank")
+        if self.image is not None and not self.image.strip():
+            raise ValueError("image must be omitted or non-blank")
+        if self.execution_profile is None and self.image is None:
+            raise ValueError("executionProfile or image is required")
+        if self.parallelism > self.shard_count:
+            raise ValueError("parallelism must not exceed shardCount")
+        command_bytes = 0
+        for field_name, values in (("command", self.command), ("args", self.args)):
+            for value in values:
+                if not isinstance(value, str) or not value.strip() or "\x00" in value:
+                    raise ValueError(
+                        f"{field_name} items must be non-empty strings without NUL"
+                    )
+                if len(value) > 8192:
+                    raise ValueError(f"{field_name} item exceeds 8192 characters")
+                command_bytes += len(value.encode("utf-8"))
+        if command_bytes > 32768:
+            raise ValueError("command and args exceed 32768 UTF-8 bytes")
+        env_bytes = 0
+        for key, value in self.env.items():
+            if CPU_JOB_ENV_NAME_PATTERN.fullmatch(key) is None:
+                raise ValueError(f"invalid CPU Job environment variable: {key}")
+            if key in CPU_JOB_RESERVED_ENV:
+                raise ValueError(f"reserved CPU Job environment variable: {key}")
+            if CPU_JOB_SECRET_ENV_PATTERN.search(key):
+                raise ValueError(f"Sensitive field is forbidden in cpuJob.env: {key}")
+            if not isinstance(value, str) or "\x00" in value:
+                raise ValueError("CPU Job environment values must be strings without NUL")
+            env_bytes += len(key.encode("utf-8")) + len(value.encode("utf-8"))
+        if env_bytes > 8192:
+            raise ValueError("CPU Job environment exceeds 8192 UTF-8 bytes")
+        _reject_forbidden_keys({"env": self.env}, path="cpuJob")
         return self
 
 

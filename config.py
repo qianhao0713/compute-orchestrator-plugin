@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,7 @@ class Settings:
     stable_workspace_root: Path
     plugin_log_dir: Path = Path("/home/scientist/.claude/logs")
     enable_handoff: bool = False
+    cpu_job_mount_path: str = "/mnt/nas"
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 30.0
     write_timeout_seconds: float = 30.0
@@ -33,6 +34,9 @@ class Settings:
             "PLUGIN_LOG_DIR", "/home/scientist/.claude/logs/"
         ).strip()
         enable_handoff = _parse_bool_env("ENABLE_HANDOFF", default=False)
+        cpu_job_mount_path = os.environ.get(
+            "K8S_CPU_MOUNT_PATH", "/mnt/nas"
+        ).strip()
 
         if not base_url:
             raise RuntimeError("PORTAL_BASE_URL is required")
@@ -42,6 +46,8 @@ class Settings:
             raise RuntimeError("AI_SCIENTIST_STABLE_WORKSPACE_ROOT is required")
         if not plugin_log_dir:
             raise RuntimeError("PLUGIN_LOG_DIR must not be empty")
+        if not cpu_job_mount_path or not PurePosixPath(cpu_job_mount_path).is_absolute():
+            raise RuntimeError("K8S_CPU_MOUNT_PATH must be an absolute container path")
 
         project_id = _resolve_project_id(project_id_raw, workspace)
 
@@ -52,6 +58,7 @@ class Settings:
             stable_workspace_root=Path(workspace).expanduser().resolve(),
             plugin_log_dir=Path(plugin_log_dir).expanduser().resolve(),
             enable_handoff=enable_handoff,
+            cpu_job_mount_path=cpu_job_mount_path.rstrip("/") or "/",
             connect_timeout_seconds=float(
                 os.environ.get("PORTAL_CONNECT_TIMEOUT_SECONDS", "5")
             ),

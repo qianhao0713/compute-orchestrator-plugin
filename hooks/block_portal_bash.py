@@ -14,12 +14,16 @@ from typing import Any
 
 
 GPU_96G_ENV = "python310_torch29_cuda"
-PORTAL_PATH_PATTERN = re.compile(r"/scientist/deployment(?:/|\b)", re.I)
+PORTAL_PATH_PATTERN = re.compile(
+    r"/scientist/(?:deployment(?:/|\b)|project/[0-9]+/jobs(?:/|\b))",
+    re.I,
+)
 NETWORK_CLIENT_PATTERN = re.compile(
     r"(?:^|[;&|()\s])(?:curl|wget|http|https)(?:\s|$)|"
     r"\b(?:requests|httpx|aiohttp)\s*\.\s*"
     r"(?:request|get|post|put|patch|delete)\s*\(|"
     r"\burllib\.request\b|"
+    r"\b(?:fetch\s*\(|axios\s*\.)|"
     r"\b(?:Invoke-WebRequest|Invoke-RestMethod)\b",
     re.I,
 )

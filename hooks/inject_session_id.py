@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inject Claude Code's authoritative session ID into ensure_resource."""
+"""Inject Claude Code's authoritative session ID into Portal submissions."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from typing import Any
 EXPECTED_TOOLS = {
     "mcp__plugin_compute-orchestrator_res__ensure_resource",
     "mcp__res__ensure_resource",
+    "mcp__plugin_compute-orchestrator_res__submit_cpu_job",
+    "mcp__res__submit_cpu_job",
 }
 MAX_SESSION_ID_LENGTH = 128
 

@@ -6,7 +6,7 @@ import pytest
 import respx
 
 from config import Settings
-from models import EnsureResourceRequest, PendingRequest, ResourceSpec
+from models import CpuJobSubmitRequest, EnsureResourceRequest, PendingRequest, ResourceSpec
 from portal_client import PortalAPIError, PortalClient
 
 
@@ -249,3 +249,66 @@ def test_empty_plugin_log_dir_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("PLUGIN_LOG_DIR", " ")
     with pytest.raises(RuntimeError, match="PLUGIN_LOG_DIR"):
         Settings.from_env()
+
+
+def test_k8s_mount_defaults_and_accepts_absolute_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTAL_BASE_URL", "portal.example.com")
+    monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("PORTAL_PROJECT_ID", "1")
+    monkeypatch.setenv("AI_SCIENTIST_STABLE_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.delenv("K8S_CPU_MOUNT_PATH", raising=False)
+    assert Settings.from_env().cpu_job_mount_path == "/mnt/nas"
+    monkeypatch.setenv("K8S_CPU_MOUNT_PATH", "/workspace/")
+    assert Settings.from_env().cpu_job_mount_path == "/workspace"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_cpu_job_endpoints_use_project_scope_and_log_requests(tmp_path):
+    client = _client(tmp_path)
+    base = "https://portal.example.com/scientist/project/1/jobs"
+    resources_route = respx.get(f"{base}/resources").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": "00000", "data": {"nodes": []}, "traceId": "r1"},
+        )
+    )
+    submit_route = respx.post(f"{base}/submit").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": "00000",
+                "data": {"jobId": "job-1", "state": "ACCEPTED"},
+                "traceId": "r2",
+            },
+        )
+    )
+    request = CpuJobSubmitRequest(
+        requestId="request-1",
+        sessionId="session-1",
+        executionProfile="python-cpu",
+        command=["/bin/sh", "/mnt/nas/launch.sh"],
+        shardCount=2,
+        parallelism=2,
+        cpu=1,
+        memoryGiB=2,
+    )
+
+    assert (await client.get_cpu_job_resources())["nodes"] == []
+    result = await client.submit_cpu_job(request)
+    assert result["jobId"] == "job-1"
+    assert resources_route.called and submit_route.called
+    sent = json.loads(submit_route.calls.last.request.content)
+    assert sent["sessionId"] == "session-1"
+    assert "projectId" not in sent
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "portal_requests.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [record["url"] for record in records] == [
+        f"{base}/resources",
+        f"{base}/submit",
+    ]

@@ -1,8 +1,9 @@
 # Compute Orchestrator Claude Code Plugin
 
-This plugin evaluates scientific workloads, prepares reusable data dependencies
-in the current CPU container, requests CPU, GPU-32G, GPU-40G, or GPU-96G resources through Portal, and
-resumes the task in the new Claude Code runtime.
+This plugin evaluates scientific workloads, prepares reusable data dependencies,
+requests CPU or GPU resources through Portal when the interactive container must move,
+and submits independently shardable CPU workloads as asynchronous K8s Indexed
+Jobs without moving the Claude Code runtime.
 
 ## Core lifecycle
 
@@ -29,6 +30,12 @@ resumes the task in the new Claude Code runtime.
    the `python310_torch29_cuda` Conda environment's torch, which must never be replaced or shadowed.
 8. Reassess after confirmed resource-related failures such as OOM.
 
+For distributed CPU work, the lifecycle is separate: validate scripts and
+stable-workspace paths, adapt K8s `JOB_COMPLETION_INDEX` to the index interface
+used by the user's script, estimate advisory capacity, obtain fixed user
+confirmation, submit the job, then monitor status/attempts/logs. K8s CPU jobs do
+not call `ensure_resource` and do not switch the current Claude Code container.
+
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
 `(1,8,64)`, `(2,16,128)`, `(4,32,256)`, or `(8,64,512)`, and must never
@@ -52,6 +59,7 @@ compatible GPU cluster is confirmed to have no available cards.
 - `models.py`: request validation and secret rejection.
 - `resource_inspector.py`: cgroup, RAM, GPU, VRAM, CUDA/PyTorch inspection.
 - `handoff_manager.py`: stable handoff persistence and artifact checks.
+- `cpu_job_preflight.py`: K8s CPU script/path/index validation and derived launcher.
 
 ## MCP tools
 
@@ -61,6 +69,14 @@ compatible GPU cluster is confirmed to have no available cards.
 - `inspect_current_resources`
 - `persist_handoff`
 - `verify_persistent_artifacts`
+- `prepare_cpu_job`
+- `estimate_cpu_job_capacity`
+- `submit_cpu_job`
+- `get_cpu_job`
+- `list_cpu_jobs`
+- `cancel_cpu_job`
+- `get_cpu_job_attempts`
+- `get_cpu_job_logs`
 
 MCP tools intentionally do not poll indefinitely. The Skill controls polling so
 users can see status and the old runtime can stop safely during migration.
@@ -93,6 +109,8 @@ not loaded.
 export PORTAL_BASE_URL="https://portal.example.com"
 export PORTAL_ACCESS_TOKEN="..." # raw token or "Bearer ..." are both accepted
 export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist/project{project_id}"
+# Optional K8s base mount containing project directories; defaults to /mnt/nas.
+# export K8S_CPU_MOUNT_PATH="/mnt/nas"
 # Optional; defaults to /home/scientist/.claude/logs/
 # export PLUGIN_LOG_DIR="/path/to/plugin/logs/"
 # Optional; defaults to false. Set true to send a continuation message.
@@ -111,6 +129,16 @@ root must be mounted and accessible from both the old and new containers. Before
 each Portal HTTP request, the plugin appends the method, URL, sanitized headers,
 and JSON body to `PLUGIN_LOG_DIR/portal_requests.jsonl`. Authorization is
 redacted. A logging failure prevents the Portal request from being sent.
+
+K8s CPU submissions use the normal (non-VIP) storage route and prefer a Portal
+execution profile; a pullable custom image is also accepted when required.
+Every declared input must exist beneath
+`AI_SCIENTIST_STABLE_WORKSPACE_ROOT`, and every output must have a writable
+parent there. If the stable root is `/home/scientist/project123` and
+`K8S_CPU_MOUNT_PATH=/mnt/nas`, K8s workers see the project at
+`/mnt/nas/project123`; relative paths are preserved below that directory. VIP
+jobs are rejected because the interactive container cannot verify their
+separate storage volume.
 
 `ENABLE_HANDOFF` accepts `true/false`, `1/0`, `yes/no`, or `on/off`. It
 defaults to `false`. When disabled, callers do not need to prepare continuation

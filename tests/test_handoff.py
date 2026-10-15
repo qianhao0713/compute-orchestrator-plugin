@@ -160,11 +160,13 @@ async def test_available_clusters_hides_exact_capacity(monkeypatch):
             {
                 "cluster": "GPU-96G",
                 "capacityKnown": True,
+                "capacityAvailable": True,
                 "capacitySufficient": True,
             },
             {
                 "cluster": "GPU-32G",
                 "capacityKnown": True,
+                "capacityAvailable": True,
                 "capacitySufficient": False,
             },
         ],
@@ -185,6 +187,7 @@ async def test_available_clusters_preserves_legacy_unknown_capacity(monkeypatch)
         {
             "cluster": "GPU-32G",
             "capacityKnown": False,
+            "capacityAvailable": None,
             "capacitySufficient": None,
         }
     ]
@@ -226,9 +229,9 @@ async def test_ensure_rechecks_gpu_availability_before_submit(monkeypatch, tmp_p
         await server.ensure_resource(
             request_id="request-1",
             resource_type="GPU",
-            cpu=16,
-            memory_gib=112,
-            gpu_count=1,
+            cpu=128,
+            memory_gib=900,
+            gpu_count=8,
             gpu_type="GPU-96G",
             session_id="session-1",
         )
@@ -247,9 +250,9 @@ async def test_ensure_submits_when_gpu_is_available(monkeypatch, tmp_path):
     result = await server.ensure_resource(
         request_id="request-1",
         resource_type="GPU",
-        cpu=16,
-        memory_gib=112,
-        gpu_count=1,
+        cpu=128,
+        memory_gib=900,
+        gpu_count=8,
         gpu_type="GPU-96G",
         session_id="session-1",
     )

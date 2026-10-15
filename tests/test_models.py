@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from models import EnsureResourceRequest, PendingRequest, ResourceSpec
+from models import CpuJobSubmitRequest, EnsureResourceRequest, PendingRequest, ResourceSpec
 
 
 @pytest.mark.parametrize(
@@ -39,24 +39,20 @@ def test_v100_display_name_is_rejected_as_backend_enum():
         )
 
 
-@pytest.mark.parametrize(
-    ("gpu_count", "cpu", "memory_gib"),
-    [(1, 16, 112), (2, 32, 225), (4, 64, 450), (8, 128, 900)],
-)
-def test_v5000_accepts_only_fixed_specs(gpu_count, cpu, memory_gib):
+def test_v5000_accepts_only_eight_card_spec():
     resource = ResourceSpec(
         resourceType="GPU",
-        cpu=cpu,
-        memoryGiB=memory_gib,
+        cpu=128,
+        memoryGiB=900,
         gpuType="V5000",
-        gpuCount=gpu_count,
+        gpuCount=8,
     )
     assert resource.gpu_type == "V5000"
 
 
 def test_v5000_rejects_unsupported_gpu_count():
     with pytest.raises(
-        ValidationError, match="GPU-96G GPU count must be one of 1, 2, 4, 8"
+        ValidationError, match="GPU-96G GPU count must be one of 8"
     ):
         ResourceSpec(
             resourceType="GPU",
@@ -137,3 +133,41 @@ def test_pending_request_allows_empty_message():
 def test_pending_request_rejects_secret_key():
     with pytest.raises(ValidationError):
         PendingRequest(message="continue", parts=[{"accessToken": "secret"}])
+
+
+def _cpu_job(**overrides):
+    values = {
+        "requestId": "cpu-job-1",
+        "sessionId": "session-1",
+        "executionProfile": "python-cpu",
+        "command": ["/bin/sh", "/mnt/nas/job/launch.sh"],
+        "shardCount": 4,
+        "parallelism": 2,
+        "cpu": 2,
+        "memoryGiB": 4,
+    }
+    values.update(overrides)
+    return CpuJobSubmitRequest(**values)
+
+
+def test_cpu_job_request_accepts_valid_normal_job():
+    request = _cpu_job()
+    assert request.parallelism == 2
+    assert request.is_vip is False
+
+
+def test_cpu_job_request_rejects_parallelism_above_shards():
+    with pytest.raises(ValidationError, match="parallelism must not exceed"):
+        _cpu_job(shardCount=2, parallelism=3)
+
+
+def test_cpu_job_request_rejects_reserved_or_secret_env():
+    with pytest.raises(ValidationError, match="reserved CPU Job"):
+        _cpu_job(env={"JOB_COMPLETION_INDEX": "fake"})
+    with pytest.raises(ValidationError, match="Sensitive field"):
+        _cpu_job(env={"API_TOKEN": "secret"})
+
+
+def test_cpu_job_request_rejects_vip_until_visibility_can_be_verified():
+    with pytest.raises(ValidationError, match="VIP CPU jobs"):
+        _cpu_job(isVip=True)

@@ -74,6 +74,15 @@ def test_cpu_candidate_gets_classification_not_explicit_gpu_claim():
     assert "Mandatory compute gate" not in context
 
 
+def test_distributed_cpu_prompt_routes_to_k8s_preflight():
+    context = _context("用多机CPU并行处理这批数据")
+    assert "Mandatory distributed-CPU gate" in context
+    assert "references/k8s-cpu-jobs.md" in context
+    assert "prepare_cpu_job" in context
+    assert "JOB_COMPLETION_INDEX" in context
+    assert "Do not use ensure_resource" in context
+
+
 def test_non_string_prompt_is_ignored():
     assert build_hook_output({"prompt": None}) is None
 

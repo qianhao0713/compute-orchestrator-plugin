@@ -1,7 +1,7 @@
 {
   "name": "compute-orchestrator",
-  "version": "0.3.0",
-  "description": "Evaluate scientific workloads, prepare persistent inputs, provision CPU or GPU resources, and resume work after runtime migration.",
+  "version": "0.4.0",
+  "description": "Plan compute, provision GPU runtimes, and submit verified distributed CPU jobs to K8s through Portal.",
   "author": {
     "name": "Compute Orchestrator Team"
   },

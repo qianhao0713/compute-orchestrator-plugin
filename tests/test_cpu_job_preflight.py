@@ -1,0 +1,137 @@
+from pathlib import Path
+
+import pytest
+
+from cpu_job_preflight import load_verified_preflight, prepare_cpu_job
+
+
+def _prepare(root: Path, **overrides):
+    values = {
+        "stable_root": root,
+        "mount_path": "/mnt/nas",
+        "request_id": "request-1",
+        "command": ["python", str(root / "worker.py")],
+        "shard_count": 4,
+        "script_paths": [str(root / "worker.py")],
+        "input_paths": [str(root / "data.csv")],
+        "output_paths": [str(root / "results")],
+        "worker_index_env": "SHARD_ID",
+        "worker_index_argument": None,
+        "worker_index_base": 0,
+    }
+    values.update(overrides)
+    return prepare_cpu_job(**values)
+
+
+def _workspace(tmp_path: Path) -> Path:
+    root = tmp_path / "project1"
+    root.mkdir()
+    (root / "data.csv").write_text("value\n1\n", encoding="utf-8")
+    (root / "worker.py").write_text(
+        'import os\nprint(os.environ["SHARD_ID"])\n', encoding="utf-8"
+    )
+    return root
+
+
+def test_preflight_maps_k8s_index_to_user_environment(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(root, worker_index_base=1)
+
+    launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
+    assert 'raw_index="${JOB_COMPLETION_INDEX:' in launcher
+    assert 'worker_index="$((raw_index + 1))"' in launcher
+    assert 'export SHARD_ID="$worker_index"' in launcher
+    assert f"{root}/worker.py" not in launcher
+    assert "/mnt/nas/project1/worker.py" in launcher
+    assert "cd /mnt/nas/project1" in launcher
+    assert result["jobCommand"][1].startswith(
+        "/mnt/nas/project1/.compute-orchestrator/cpu-jobs/request-1/"
+    )
+
+
+def test_k8s_project_path_maps_back_to_local_stable_root(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(
+        root,
+        command=["python", "/mnt/nas/project1/worker.py"],
+        script_paths=["/mnt/nas/project1/worker.py"],
+        input_paths=["/mnt/nas/project1/data.csv"],
+        output_paths=["/mnt/nas/project1/results"],
+    )
+    assert result["scriptPaths"] == ["/mnt/nas/project1/worker.py"]
+    assert result["inputPaths"] == ["/mnt/nas/project1/data.csv"]
+
+
+def test_k8s_path_missing_project_directory_is_rejected(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="missing or unreadable|escapes"):
+        _prepare(root, input_paths=["/mnt/nas/data.csv"])
+
+
+def test_preflight_maps_index_to_user_argument(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(
+        root,
+        worker_index_env=None,
+        worker_index_argument="--rank",
+    )
+    launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
+    assert '--rank "$worker_index"' in launcher
+
+
+def test_native_k8s_index_needs_no_mapping(tmp_path):
+    root = _workspace(tmp_path)
+    (root / "worker.py").write_text(
+        'import os\nprint(os.environ["JOB_COMPLETION_INDEX"])\n', encoding="utf-8"
+    )
+    result = _prepare(root, worker_index_env=None)
+    assert result["workerIndex"]["environmentVariable"] is None
+
+
+def test_multi_shard_job_rejects_missing_index_contract(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="must use JOB_COMPLETION_INDEX"):
+        _prepare(root, worker_index_env=None)
+
+
+def test_preflight_rejects_missing_hardcoded_data_path(tmp_path):
+    root = _workspace(tmp_path)
+    (root / "worker.py").write_text(
+        'from pathlib import Path\nPath("missing/input.csv").read_text()\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="not declared as output"):
+        _prepare(root)
+
+
+def test_preflight_rejects_collective_runtime(tmp_path):
+    root = _workspace(tmp_path)
+    (root / "worker.py").write_text(
+        "import torch.distributed as dist\ndist.barrier()\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="cross-worker coordination"):
+        _prepare(root)
+
+
+def test_preflight_requires_command_scripts_to_be_inspected(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="declared in script_paths"):
+        _prepare(root, script_paths=[])
+
+
+def test_preflight_rejects_path_outside_stable_workspace(tmp_path):
+    root = _workspace(tmp_path)
+    outside = tmp_path / "outside.csv"
+    outside.write_text("secret", encoding="utf-8")
+    with pytest.raises(ValueError, match="escapes"):
+        _prepare(root, input_paths=[str(outside)])
+
+
+def test_submit_gate_detects_modified_launcher(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(root)
+    Path(result["launcherPath"]).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="changed after preflight"):
+        load_verified_preflight(
+            stable_root=root, request_id="request-1", shard_count=4
+        )

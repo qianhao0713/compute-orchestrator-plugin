@@ -1,13 +1,26 @@
 from __future__ import annotations
 
+import json
+import math
+import os
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
 from config import Settings
+from cpu_job_preflight import (
+    load_verified_preflight,
+    prepare_cpu_job as prepare_cpu_job_files,
+)
 from handoff_manager import HandoffRecord, inspect_artifacts, write_handoff
 from gpu_aliases import public_gpu_type, to_backend_gpu_type, to_public
-from models import EnsureResourceRequest, PendingRequest, ResourceSpec
+from models import (
+    CpuJobSubmitRequest,
+    EnsureResourceRequest,
+    PendingRequest,
+    ResourceSpec,
+)
 from portal_client import PortalClient
 from resource_inspector import inspect_current_resources as inspect_local_resources
 
@@ -184,6 +197,348 @@ async def ensure_resource(
     result["submittedRequestId"] = request_id
     result["requestIdMatches"] = result.get("requestId") == request_id
     return to_public(result)
+
+
+_CPU_JOB_STATES = {
+    "ACCEPTED", "SUBMITTING", "QUEUED", "RUNNING", "RETRYING", "FAILING",
+    "CANCELLING", "SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN",
+}
+_PATH_ENV_EXCLUSIONS = {"PATH", "PYTHONPATH", "LD_LIBRARY_PATH"}
+_PATH_ENV_PREFIXES = (
+    "INPUT", "OUTPUT", "DATA", "DATASET", "RESULT", "MODEL", "CHECKPOINT", "CONFIG"
+)
+
+
+def _validate_cpu_job_id(job_id: str) -> str:
+    if (
+        not isinstance(job_id, str)
+        or not job_id.strip()
+        or len(job_id) > 512
+        or any(ord(character) < 32 for character in job_id)
+    ):
+        raise ValueError("job_id must be a non-empty opaque CPU Job identifier")
+    return job_id
+
+
+def _validate_cpu_job_env_paths(
+    env: dict[str, str], *, current_settings: Settings
+) -> None:
+    root = current_settings.stable_workspace_root.resolve(strict=True)
+    mount = (
+        PurePosixPath(current_settings.cpu_job_mount_path)
+        / current_settings.stable_workspace_root.name
+    )
+    for key, value in env.items():
+        upper = key.upper()
+        path_named = upper.endswith(("_DIR", "_FILE", "_PATH", "_ROOT")) or upper.startswith(
+            _PATH_ENV_PREFIXES
+        )
+        if upper in _PATH_ENV_EXCLUSIONS or not path_named:
+            continue
+        job_path = PurePosixPath(value)
+        if not job_path.is_absolute() or not (
+            job_path == mount or mount in job_path.parents
+        ):
+            raise ValueError(
+                f"CPU Job path environment variable {key} must be under "
+                f"{mount}"
+            )
+        local = root.joinpath(*job_path.relative_to(mount).parts)
+        is_output = upper.startswith(("OUTPUT", "RESULT"))
+        if is_output:
+            parent = local
+            while not parent.exists() and parent != parent.parent:
+                parent = parent.parent
+            resolved = parent.resolve(strict=True)
+            if root not in (resolved, *resolved.parents) or not os.access(parent, os.W_OK):
+                raise ValueError(f"CPU Job output path is not writable in stable storage: {key}")
+        else:
+            try:
+                resolved = local.resolve(strict=True)
+            except OSError as exc:
+                raise ValueError(
+                    f"CPU Job input path is not visible in stable storage: {key}"
+                ) from exc
+            if root not in (resolved, *resolved.parents) or not os.access(resolved, os.R_OK):
+                raise ValueError(
+                    f"CPU Job input path is not readable in stable storage: {key}"
+                )
+
+
+def _persist_cpu_job_submission(
+    *,
+    current_settings: Settings,
+    request: CpuJobSubmitRequest,
+    result: dict[str, Any] | None = None,
+) -> None:
+    directory = (
+        current_settings.stable_workspace_root
+        / ".compute-orchestrator"
+        / "cpu-jobs"
+        / request.request_id
+    )
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    request_body = request.model_dump(by_alias=True, exclude_none=True)
+    target = directory / "job.json"
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("saved CPU Job request record is unreadable") from exc
+        if existing.get("request") != request_body:
+            raise ValueError(
+                "request_id already has a different CPU Job request; "
+                "retry only with the exact original request"
+            )
+    record = {
+        "requestId": request.request_id,
+        "request": request_body,
+        "response": None if result is None else {
+            "jobId": result.get("jobId"),
+            "state": result.get("state"),
+            "traceId": result.get("traceId"),
+            "replayed": result.get("replayed"),
+        },
+    }
+    temporary = target.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    os.replace(temporary, target)
+
+
+@mcp.tool()
+def prepare_cpu_job(
+    request_id: str,
+    command: list[str],
+    shard_count: int,
+    script_paths: list[str] | None = None,
+    input_paths: list[str] | None = None,
+    output_paths: list[str] | None = None,
+    worker_index_env: str | None = None,
+    worker_index_argument: str | None = None,
+    worker_index_base: int = 0,
+) -> dict[str, Any]:
+    """Validate stable paths and create a derived K8s worker-index launcher.
+
+    JOB_COMPLETION_INDEX is the K8s source index. Map it to the user's actual
+    environment variable or command-line argument without modifying the source
+    script. Multi-shard jobs with no mapping must reference JOB_COMPLETION_INDEX
+    directly. All scripts and inputs must resolve inside stable storage.
+    """
+    current_settings = settings()
+    return prepare_cpu_job_files(
+        stable_root=current_settings.stable_workspace_root,
+        mount_path=current_settings.cpu_job_mount_path,
+        request_id=request_id,
+        command=command,
+        shard_count=shard_count,
+        script_paths=script_paths or [],
+        input_paths=input_paths or [],
+        output_paths=output_paths or [],
+        worker_index_env=worker_index_env,
+        worker_index_argument=worker_index_argument,
+        worker_index_base=worker_index_base,
+    )
+
+
+@mcp.tool()
+async def estimate_cpu_job_capacity(
+    cpu_per_worker: int,
+    memory_gib_per_worker: int,
+    parallelism: int,
+) -> dict[str, Any]:
+    """Return sanitized immediate-capacity booleans for a proposed CPU Job."""
+    if not 1 <= cpu_per_worker <= 32:
+        raise ValueError("cpu_per_worker must be from 1 to 32")
+    if not 1 <= memory_gib_per_worker <= 128:
+        raise ValueError("memory_gib_per_worker must be from 1 to 128")
+    if not 1 <= parallelism <= 64:
+        raise ValueError("parallelism must be from 1 to 64")
+    result = await portal_client().get_cpu_job_resources()
+    nodes = result.get("nodes")
+    if not isinstance(nodes, list):
+        raise ValueError("Portal did not return a valid CPU Job resource snapshot")
+    slots = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError("Portal returned an invalid CPU Job node entry")
+        if not (node.get("ready") is True and node.get("schedulable") is True):
+            continue
+        available_cpu = node.get("availableCpuCores")
+        available_memory = node.get("availableMemoryBytes")
+        if not isinstance(available_cpu, (int, float)) or isinstance(available_cpu, bool):
+            raise ValueError("Portal returned invalid available CPU capacity")
+        if not isinstance(available_memory, (int, float)) or isinstance(available_memory, bool):
+            raise ValueError("Portal returned invalid available memory capacity")
+        cpu_slots = math.floor(max(0.0, float(available_cpu)) / cpu_per_worker)
+        memory_slots = math.floor(
+            max(0.0, float(available_memory))
+            / (memory_gib_per_worker * 1024**3)
+        )
+        slots += min(cpu_slots, memory_slots)
+    return {
+        "capacityKnown": True,
+        "capacityAvailable": slots > 0,
+        "capacitySufficient": slots >= parallelism,
+        "requestedParallelism": parallelism,
+        "observedAt": result.get("observedAt"),
+        "traceId": result.get("traceId"),
+        "advisoryOnly": True,
+    }
+
+
+@mcp.tool()
+async def submit_cpu_job(
+    request_id: str,
+    shard_count: int,
+    parallelism: int,
+    cpu_per_worker: int,
+    memory_gib_per_worker: int,
+    execution_profile: str | None = None,
+    image: str | None = None,
+    ephemeral_storage_gib: int = 2,
+    job_backoff_limit: int = 6,
+    active_deadline_seconds: int = 21600,
+    description: str | None = None,
+    env: dict[str, str] | None = None,
+    session_id: str = "",
+) -> dict[str, Any]:
+    """Submit a prepared, confirmed, idempotent K8s Indexed CPU Job.
+
+    Call prepare_cpu_job first, then estimate_cpu_job_capacity, then use the
+    fixed AskUserQuestion contract in the Skill. The trusted PreToolUse hook
+    injects session_id. This tool never switches the Claude Code container.
+    """
+    current_settings = settings()
+    manifest = load_verified_preflight(
+        stable_root=current_settings.stable_workspace_root,
+        request_id=request_id,
+        shard_count=shard_count,
+    )
+    effective_env = env or {}
+    _validate_cpu_job_env_paths(effective_env, current_settings=current_settings)
+    request = CpuJobSubmitRequest(
+        requestId=request_id,
+        sessionId=session_id,
+        executionProfile=execution_profile,
+        isVip=False,
+        image=image,
+        command=manifest["command"],
+        args=manifest["args"],
+        shardCount=shard_count,
+        parallelism=parallelism,
+        cpu=cpu_per_worker,
+        memoryGiB=memory_gib_per_worker,
+        ephemeralStorageGiB=ephemeral_storage_gib,
+        jobBackoffLimit=job_backoff_limit,
+        activeDeadlineSeconds=active_deadline_seconds,
+        description=description,
+        env=effective_env,
+    )
+    _persist_cpu_job_submission(
+        current_settings=current_settings, request=request
+    )
+    result = await portal_client().submit_cpu_job(request)
+    if not isinstance(result.get("jobId"), str) or not result["jobId"].strip():
+        raise ValueError("Portal returned an invalid CPU Job submission response")
+    if not isinstance(result.get("state"), str):
+        raise ValueError("Portal returned an invalid CPU Job submission state")
+    _persist_cpu_job_submission(
+        current_settings=current_settings, request=request, result=result
+    )
+    return to_public(result)
+
+
+@mcp.tool()
+async def get_cpu_job(job_id: str) -> dict[str, Any]:
+    """Return Portal's latest persisted CPU Job state."""
+    return to_public(await portal_client().get_cpu_job(_validate_cpu_job_id(job_id)))
+
+
+@mcp.tool()
+async def list_cpu_jobs(
+    request_id: str | None = None,
+    states: list[str] | None = None,
+    cursor: str | None = None,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """List CPU Jobs using request/state filters and opaque cursor pagination."""
+    if request_id is not None and (
+        not request_id.strip() or not 1 <= len(request_id) <= 64
+    ):
+        raise ValueError("request_id must be from 1 to 64 characters")
+    if states is not None:
+        if len(states) > 8 or any(state not in _CPU_JOB_STATES for state in states):
+            raise ValueError("states must contain at most 8 recognized CPU Job states")
+    if cursor is not None and not cursor:
+        raise ValueError("cursor must be omitted or non-empty")
+    if not 1 <= page_size <= 200:
+        raise ValueError("page_size must be from 1 to 200")
+    return to_public(
+        await portal_client().list_cpu_jobs(
+            request_id=request_id,
+            states=states,
+            cursor=cursor,
+            page_size=page_size,
+        )
+    )
+
+
+@mcp.tool()
+async def cancel_cpu_job(job_id: str) -> dict[str, Any]:
+    """Record cancellation intent; poll until a terminal state releases resources."""
+    return to_public(await portal_client().cancel_cpu_job(_validate_cpu_job_id(job_id)))
+
+
+@mcp.tool()
+async def get_cpu_job_attempts(
+    job_id: str,
+    shard_index: int | None = None,
+    cursor: str | None = None,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Return paginated Pod attempts, optionally for one shard."""
+    validated_job_id = _validate_cpu_job_id(job_id)
+    if shard_index is not None and shard_index < 0:
+        raise ValueError("shard_index must be non-negative")
+    if cursor is not None and not cursor:
+        raise ValueError("cursor must be omitted or non-empty")
+    if not 1 <= page_size <= 200:
+        raise ValueError("page_size must be from 1 to 200")
+    return to_public(
+        await portal_client().get_cpu_job_attempts(
+            validated_job_id,
+            shard_index=shard_index,
+            cursor=cursor,
+            page_size=page_size,
+        )
+    )
+
+
+@mcp.tool()
+async def get_cpu_job_logs(
+    job_id: str,
+    shard_index: int,
+    attempt_id: str | None = None,
+    tail_lines: int = 200,
+) -> dict[str, Any]:
+    """Return bounded logs for one CPU Job shard attempt."""
+    validated_job_id = _validate_cpu_job_id(job_id)
+    if shard_index < 0:
+        raise ValueError("shard_index must be non-negative")
+    if attempt_id is not None and not attempt_id.strip():
+        raise ValueError("attempt_id must be omitted or non-empty")
+    if not 1 <= tail_lines <= 2000:
+        raise ValueError("tail_lines must be from 1 to 2000")
+    return to_public(
+        await portal_client().get_cpu_job_logs(
+            validated_job_id,
+            shard_index=shard_index,
+            attempt_id=attempt_id,
+            tail_lines=tail_lines,
+        )
+    )
 
 
 @mcp.tool()

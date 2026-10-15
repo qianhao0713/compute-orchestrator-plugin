@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 import json
 import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 from config import Settings
 from gpu_aliases import to_public
-from models import EnsureResourceRequest, PortalEnvelope
+from models import CpuJobSubmitRequest, EnsureResourceRequest, PortalEnvelope
 
 
 class PortalAPIError(RuntimeError):
@@ -174,6 +175,115 @@ class PortalClient:
         self._log_request(method="POST", url=url, headers=headers, body=body)
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, headers=headers, json=body)
+        return self._parse(response)
+
+    def _cpu_jobs_url(self, suffix: str = "") -> str:
+        base = (
+            f"{self._settings.portal_base_url}/scientist/project/"
+            f"{self._settings.portal_project_id}/jobs"
+        )
+        return f"{base}{suffix}"
+
+    @staticmethod
+    def _cpu_job_segment(job_id: str) -> str:
+        return quote(job_id, safe="")
+
+    async def get_cpu_job_resources(self) -> dict[str, Any]:
+        url = self._cpu_jobs_url("/resources")
+        headers = self._headers()
+        self._log_request(method="GET", url=url, headers=headers)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(url, headers=headers)
+        return self._parse(response)
+
+    async def submit_cpu_job(self, request: CpuJobSubmitRequest) -> dict[str, Any]:
+        url = self._cpu_jobs_url("/submit")
+        headers = self._headers()
+        body = request.model_dump(by_alias=True, exclude_none=True)
+        self._log_request(method="POST", url=url, headers=headers, body=body)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(url, headers=headers, json=body)
+        return self._parse(response)
+
+    async def get_cpu_job(self, job_id: str) -> dict[str, Any]:
+        url = self._cpu_jobs_url(f"/{self._cpu_job_segment(job_id)}")
+        headers = self._headers()
+        self._log_request(method="GET", url=url, headers=headers)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(url, headers=headers)
+        return self._parse(response)
+
+    async def list_cpu_jobs(
+        self,
+        *,
+        request_id: str | None = None,
+        states: list[str] | None = None,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> dict[str, Any]:
+        url = self._cpu_jobs_url()
+        params: list[tuple[str, str]] = [("pageSize", str(page_size))]
+        if request_id is not None:
+            params.append(("requestId", request_id))
+        if cursor is not None:
+            params.append(("cursor", cursor))
+        params.extend(("state", state) for state in states or [])
+        headers = self._headers()
+        logged_url = str(httpx.URL(url, params=params))
+        self._log_request(method="GET", url=logged_url, headers=headers)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(url, headers=headers, params=params)
+        return self._parse(response)
+
+    async def cancel_cpu_job(self, job_id: str) -> dict[str, Any]:
+        url = self._cpu_jobs_url(f"/{self._cpu_job_segment(job_id)}/cancel")
+        headers = self._headers()
+        self._log_request(method="POST", url=url, headers=headers)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(url, headers=headers)
+        return self._parse(response)
+
+    async def get_cpu_job_attempts(
+        self,
+        job_id: str,
+        *,
+        shard_index: int | None = None,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> dict[str, Any]:
+        url = self._cpu_jobs_url(f"/{self._cpu_job_segment(job_id)}/attempts")
+        params: list[tuple[str, str]] = [("pageSize", str(page_size))]
+        if shard_index is not None:
+            params.append(("shardIndex", str(shard_index)))
+        if cursor is not None:
+            params.append(("cursor", cursor))
+        headers = self._headers()
+        logged_url = str(httpx.URL(url, params=params))
+        self._log_request(method="GET", url=logged_url, headers=headers)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(url, headers=headers, params=params)
+        return self._parse(response)
+
+    async def get_cpu_job_logs(
+        self,
+        job_id: str,
+        *,
+        shard_index: int,
+        attempt_id: str | None = None,
+        tail_lines: int = 200,
+    ) -> dict[str, Any]:
+        url = self._cpu_jobs_url(f"/{self._cpu_job_segment(job_id)}/logs")
+        params: list[tuple[str, str]] = [
+            ("shardIndex", str(shard_index)),
+            ("tailLines", str(tail_lines)),
+        ]
+        if attempt_id is not None:
+            params.append(("attemptId", attempt_id))
+        headers = self._headers()
+        logged_url = str(httpx.URL(url, params=params))
+        self._log_request(method="GET", url=logged_url, headers=headers)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(url, headers=headers, params=params)
         return self._parse(response)
 
     @classmethod

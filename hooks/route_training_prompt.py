@@ -15,6 +15,14 @@ TRAINING_PATTERN = re.compile(
     r"train(?:ing)?|megatron|deepspeed)\b|训练|微调|预训练|后训练",
     re.I,
 )
+DISTRIBUTED_CPU_PATTERN = re.compile(
+    r"\b(?:distributed cpu|cpu cluster|indexed job|parameter sweep|grid search|"
+    r"batch processing|multi[- ]?(?:node|worker)|multiprocessing|parallel workers?)\b|"
+    r"分布式CPU|CPU集群|多机CPU|多节点|多worker|参数扫描|批量分片|并行分片|大规模CPU",
+    re.I,
+)
+
+
 GPU_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:gpu|gpus|cuda|cudnn|nccl|nvidia|nvlink|vram|torchrun|"
     r"deepspeed|megatron|flashattention|flash-attention|GPU-32G|GPU-40G|GPU-96G)"
@@ -30,6 +38,7 @@ def build_hook_output(event: dict[str, Any]) -> dict[str, Any] | None:
         return None
     model_training = MODEL_PATTERN.search(prompt) and TRAINING_PATTERN.search(prompt)
     explicit_gpu = bool(GPU_PATTERN.search(prompt) or model_training)
+    explicit_distributed_cpu = bool(DISTRIBUTED_CPU_PATTERN.search(prompt))
 
     if explicit_gpu:
         context = (
@@ -55,12 +64,25 @@ def build_hook_output(event: dict[str, Any]) -> dict[str, Any] | None:
             "boundary, and built-in operator checklist. Do not "
             "proceed until all applicable gates pass."
         )
+    elif explicit_distributed_cpu:
+        context = (
+            "Mandatory distributed-CPU gate: load the compute-orchestrator skill and "
+            "read references/k8s-cpu-jobs.md before setup or execution. Verify the "
+            "work is CPU-only and independently shardable without cross-worker "
+            "collectives; K8s parallelism does not guarantee distinct physical nodes. "
+            "Inspect local resources first. If K8s is appropriate, run prepare_cpu_job "
+            "to validate stable scripts/data/outputs and map JOB_COMPLETION_INDEX to "
+            "the user's actual worker-index variable or argument. Then call "
+            "estimate_cpu_job_capacity, use the fixed submission confirmation, and "
+            "only then call submit_cpu_job. Do not use ensure_resource or switch the "
+            "Claude Code container for this path."
+        )
     else:
         context = (
             "Compute classification gate: before setup, installation, shell, "
             "launcher, or workload commands, inspect the task and executable "
-            "path for possible GPU or substantial compute use. If GPU use is "
-            "required or meaningfully possible, load the compute-orchestrator "
+            "path for possible GPU or substantial/distributed CPU use. If GPU or "
+            "distributed CPU use is required or meaningfully possible, load the compute-orchestrator "
             "skill and follow its workflow before executing. Check "
             "get_resource_status before workload launch. If resources suffice, "
             "run without a question regardless of provisioning. Proceed directly "
