@@ -139,7 +139,6 @@ def _cpu_job(**overrides):
     values = {
         "requestId": "cpu-job-1",
         "sessionId": "session-1",
-        "executionProfile": "python-cpu",
         "command": ["/bin/sh", "/mnt/nas/job/launch.sh"],
         "shardCount": 4,
         "parallelism": 2,
@@ -154,6 +153,9 @@ def test_cpu_job_request_accepts_valid_normal_job():
     request = _cpu_job()
     assert request.parallelism == 2
     assert request.is_vip is False
+    payload = request.model_dump(by_alias=True, exclude_none=True)
+    assert "executionProfile" not in payload
+    assert "image" not in payload
 
 
 def test_cpu_job_request_rejects_parallelism_above_shards():

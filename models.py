@@ -101,9 +101,6 @@ class CpuJobSubmitRequest(BaseModel):
 
     request_id: str = Field(alias="requestId", min_length=1, max_length=64)
     session_id: str = Field(alias="sessionId", min_length=1, max_length=128)
-    execution_profile: str | None = Field(
-        default=None, alias="executionProfile", max_length=64
-    )
     is_vip: bool = Field(default=False, alias="isVip")
     image: str | None = Field(default=None, max_length=512)
     command: list[str] = Field(min_length=1, max_length=64)
@@ -131,12 +128,8 @@ class CpuJobSubmitRequest(BaseModel):
                 "VIP CPU jobs are not accepted by this plugin because stable-path "
                 "visibility cannot be verified"
             )
-        if self.execution_profile is not None and not self.execution_profile.strip():
-            raise ValueError("executionProfile must be omitted or non-blank")
         if self.image is not None and not self.image.strip():
             raise ValueError("image must be omitted or non-blank")
-        if self.execution_profile is None and self.image is None:
-            raise ValueError("executionProfile or image is required")
         if self.parallelism > self.shard_count:
             raise ValueError("parallelism must not exceed shardCount")
         command_bytes = 0

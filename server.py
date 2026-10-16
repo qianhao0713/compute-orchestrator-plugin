@@ -203,12 +203,6 @@ _CPU_JOB_STATES = {
     "ACCEPTED", "SUBMITTING", "QUEUED", "RUNNING", "RETRYING", "FAILING",
     "CANCELLING", "SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN",
 }
-_PATH_ENV_EXCLUSIONS = {"PATH", "PYTHONPATH", "LD_LIBRARY_PATH"}
-_PATH_ENV_PREFIXES = (
-    "INPUT", "OUTPUT", "DATA", "DATASET", "RESULT", "MODEL", "CHECKPOINT", "CONFIG"
-)
-
-
 def _validate_cpu_job_id(job_id: str) -> str:
     if (
         not isinstance(job_id, str)
@@ -221,20 +215,22 @@ def _validate_cpu_job_id(job_id: str) -> str:
 
 
 def _validate_cpu_job_env_paths(
-    env: dict[str, str], *, current_settings: Settings
+    env: dict[str, str],
+    *,
+    current_settings: Settings,
+    output_job_paths: list[str],
+    env_path_keys: list[str],
 ) -> None:
     root = current_settings.stable_workspace_root.resolve(strict=True)
     mount = (
         PurePosixPath(current_settings.cpu_job_mount_path)
         / current_settings.stable_workspace_root.name
     )
-    for key, value in env.items():
-        upper = key.upper()
-        path_named = upper.endswith(("_DIR", "_FILE", "_PATH", "_ROOT")) or upper.startswith(
-            _PATH_ENV_PREFIXES
-        )
-        if upper in _PATH_ENV_EXCLUSIONS or not path_named:
-            continue
+    output_roots = [PurePosixPath(value) for value in output_job_paths]
+    for key in env_path_keys:
+        value = env.get(key)
+        if not isinstance(value, str):
+            raise ValueError(f"prepared path environment variable is missing: {key}")
         job_path = PurePosixPath(value)
         if not job_path.is_absolute() or not (
             job_path == mount or mount in job_path.parents
@@ -244,7 +240,10 @@ def _validate_cpu_job_env_paths(
                 f"{mount}"
             )
         local = root.joinpath(*job_path.relative_to(mount).parts)
-        is_output = upper.startswith(("OUTPUT", "RESULT"))
+        is_output = any(
+            job_path == output or output in job_path.parents
+            for output in output_roots
+        )
         if is_output:
             parent = local
             while not parent.exists() and parent != parent.parent:
@@ -315,16 +314,24 @@ def prepare_cpu_job(
     script_paths: list[str] | None = None,
     input_paths: list[str] | None = None,
     output_paths: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    env_path_keys: list[str] | None = None,
+    required_env_keys: list[str] | None = None,
+    optional_env_keys: list[str] | None = None,
+    independent_shards_confirmed: bool = False,
+    uses_native_completion_index: bool = False,
     worker_index_env: str | None = None,
     worker_index_argument: str | None = None,
     worker_index_base: int = 0,
 ) -> dict[str, Any]:
     """Validate stable paths and create a derived K8s worker-index launcher.
 
-    JOB_COMPLETION_INDEX is the K8s source index. Map it to the user's actual
-    environment variable or command-line argument without modifying the source
-    script. Multi-shard jobs with no mapping must reference JOB_COMPLETION_INDEX
-    directly. All scripts and inputs must resolve inside stable storage.
+    The model must confirm independent shards, explicitly declare whether user
+    code consumes JOB_COMPLETION_INDEX natively or map it to the user's actual
+    environment variable/argument, classify all consumed environment variables
+    as required or optional, and list all scripts/configuration and business
+    input/output paths. The plugin validates those declarations and creates a
+    launcher without modifying user source.
     """
     current_settings = settings()
     return prepare_cpu_job_files(
@@ -336,6 +343,12 @@ def prepare_cpu_job(
         script_paths=script_paths or [],
         input_paths=input_paths or [],
         output_paths=output_paths or [],
+        env=env or {},
+        env_path_keys=env_path_keys or [],
+        required_env_keys=required_env_keys or [],
+        optional_env_keys=optional_env_keys or [],
+        independent_shards_confirmed=independent_shards_confirmed,
+        uses_native_completion_index=uses_native_completion_index,
         worker_index_env=worker_index_env,
         worker_index_argument=worker_index_argument,
         worker_index_base=worker_index_base,
@@ -395,20 +408,20 @@ async def submit_cpu_job(
     parallelism: int,
     cpu_per_worker: int,
     memory_gib_per_worker: int,
-    execution_profile: str | None = None,
     image: str | None = None,
     ephemeral_storage_gib: int = 2,
     job_backoff_limit: int = 6,
     active_deadline_seconds: int = 21600,
     description: str | None = None,
-    env: dict[str, str] | None = None,
     session_id: str = "",
 ) -> dict[str, Any]:
     """Submit a prepared, confirmed, idempotent K8s Indexed CPU Job.
 
     Call prepare_cpu_job first, then estimate_cpu_job_capacity, then use the
-    fixed AskUserQuestion contract in the Skill. The trusted PreToolUse hook
-    injects session_id. This tool never switches the Claude Code container.
+    fixed AskUserQuestion contract in the Skill. Environment variables come only
+    from the verified preflight manifest and cannot be added at submission time.
+    The trusted PreToolUse hook injects session_id. This tool never switches the
+    Claude Code container.
     """
     current_settings = settings()
     manifest = load_verified_preflight(
@@ -416,12 +429,28 @@ async def submit_cpu_job(
         request_id=request_id,
         shard_count=shard_count,
     )
-    effective_env = env or {}
-    _validate_cpu_job_env_paths(effective_env, current_settings=current_settings)
+    effective_env = manifest.get("env")
+    if not isinstance(effective_env, dict):
+        raise ValueError("prepared CPU Job environment is missing or invalid")
+    output_job_paths = manifest.get("outputJobPaths")
+    if not isinstance(output_job_paths, list) or not all(
+        isinstance(value, str) for value in output_job_paths
+    ):
+        raise ValueError("prepared CPU Job output paths are missing or invalid")
+    env_path_keys = manifest.get("envPathKeys")
+    if not isinstance(env_path_keys, list) or not all(
+        isinstance(value, str) for value in env_path_keys
+    ):
+        raise ValueError("prepared CPU Job environment path keys are missing or invalid")
+    _validate_cpu_job_env_paths(
+        effective_env,
+        current_settings=current_settings,
+        output_job_paths=output_job_paths,
+        env_path_keys=env_path_keys,
+    )
     request = CpuJobSubmitRequest(
         requestId=request_id,
         sessionId=session_id,
-        executionProfile=execution_profile,
         isVip=False,
         image=image,
         command=manifest["command"],

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import os
@@ -9,28 +8,18 @@ import re
 import shlex
 from typing import Any
 
+from models import (
+    CPU_JOB_ENV_NAME_PATTERN,
+    CPU_JOB_RESERVED_ENV,
+    CPU_JOB_SECRET_ENV_PATTERN,
+)
+
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
-_DATA_SUFFIXES = {
-    ".bin", ".cfg", ".ckpt", ".csv", ".h5", ".hdf5", ".ini", ".json",
-    ".jsonl", ".npy", ".npz", ".parquet", ".pkl", ".pt", ".pth",
-    ".safetensors", ".toml", ".tsv", ".txt", ".yaml", ".yml",
-}
-_DATA_COMPONENTS = {
-    "checkpoint", "checkpoints", "config", "configs", "data", "dataset",
-    "datasets", "input", "inputs", "model", "models", "output", "outputs",
-}
-_INSPECTED_COMMAND_SUFFIXES = {
-    ".cfg", ".ini", ".json", ".py", ".sh", ".toml", ".yaml", ".yml",
-}
-_COLLECTIVE_PATTERNS = {
-    "MPI": re.compile(r"\b(?:mpi4py|mpirun|mpiexec|MPI_COMM_WORLD)\b", re.I),
-    "torch.distributed": re.compile(
-        r"\btorch\.distributed\b|\bdist\.(?:all_reduce|all_gather|gather|scatter|"
-        r"reduce_scatter|barrier)\s*\(", re.I
-    ),
-    "distributed runtime": re.compile(r"\b(?:ray\.init|dask\.distributed|pyspark)\b", re.I),
+_IMPLICIT_ENV = {
+    "HOME", "HOSTNAME", "LANG", "LC_ALL", "LOGNAME", "PATH", "PWD",
+    "PYTHONPATH", "SHLVL", "TMPDIR", "USER",
 }
 
 
@@ -100,35 +89,153 @@ def _resolve_local_path(
     return resolved, job_path
 
 
-def _looks_like_data_path(value: str) -> bool:
-    if not value or "\n" in value or "://" in value:
-        return False
-    if value.startswith(("$", "${")):
-        return False
-    path = PurePosixPath(value)
-    if path.suffix.lower() in _DATA_SUFFIXES:
-        return True
-    lowered_parts = {part.lower() for part in path.parts}
-    return bool(lowered_parts & _DATA_COMPONENTS) or value.startswith(("./", "../", "/mnt/nas/"))
+def _prepare_environment(
+    env: dict[str, str],
+    *,
+    stable_root: Path,
+    project_mount: PurePosixPath,
+    worker_index_env: str | None,
+    input_roots: list[Path],
+    output_roots: list[Path],
+    env_path_keys: list[str],
+    required_env_keys: list[str],
+    optional_env_keys: list[str],
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    if not isinstance(env, dict):
+        raise ValueError("CPU Job env must be an object of string values")
+    if len(env) > 32:
+        raise ValueError("CPU Job environment supports at most 32 variables")
+    if len(env_path_keys) != len(set(env_path_keys)):
+        raise ValueError("env_path_keys must not contain duplicates")
+    if len(required_env_keys) != len(set(required_env_keys)):
+        raise ValueError("required_env_keys must not contain duplicates")
+    if len(optional_env_keys) != len(set(optional_env_keys)):
+        raise ValueError("optional_env_keys must not contain duplicates")
+    required_names = set(required_env_keys)
+    optional_names = set(optional_env_keys)
+    overlap = sorted(required_names & optional_names)
+    if overlap:
+        raise ValueError(
+            "environment variables cannot be both required and optional: "
+            + ", ".join(overlap)
+        )
+    for key in required_names | optional_names:
+        if CPU_JOB_ENV_NAME_PATTERN.fullmatch(key) is None:
+            raise ValueError(f"invalid declared CPU Job environment variable: {key}")
+    if worker_index_env and worker_index_env not in required_names:
+        raise ValueError(
+            "worker_index_env must be declared in required_env_keys: "
+            + worker_index_env
+        )
+    path_keys = set(env_path_keys)
+    for key in path_keys:
+        if CPU_JOB_ENV_NAME_PATTERN.fullmatch(key) is None or key not in env:
+            raise ValueError(
+                f"env_path_keys entry must name a supplied env variable: {key}"
+            )
+    normalized: dict[str, str] = {}
+    env_bytes = 0
+    for key, value in env.items():
+        if CPU_JOB_ENV_NAME_PATTERN.fullmatch(key) is None:
+            raise ValueError(f"invalid CPU Job environment variable: {key}")
+        if key in CPU_JOB_RESERVED_ENV:
+            raise ValueError(f"reserved CPU Job environment variable: {key}")
+        if CPU_JOB_SECRET_ENV_PATTERN.search(key):
+            raise ValueError(f"sensitive CPU Job environment variable is forbidden: {key}")
+        if not isinstance(value, str) or "\x00" in value:
+            raise ValueError("CPU Job environment values must be strings without NUL")
+        if key == worker_index_env:
+            raise ValueError(
+                f"{key} is generated from JOB_COMPLETION_INDEX and must not be set in env"
+            )
+        path_named = key in path_keys
+        raw_path = Path(value).expanduser()
+        looks_like_workspace_path = False
+        if raw_path.is_absolute():
+            try:
+                resolved_value = raw_path.resolve(strict=False)
+            except OSError:
+                resolved_value = raw_path
+            looks_like_workspace_path = _inside(resolved_value, stable_root)
+        posix_value = PurePosixPath(value)
+        looks_like_workspace_path = looks_like_workspace_path or (
+            posix_value.is_absolute()
+            and (posix_value == project_mount or project_mount in posix_value.parents)
+        )
+        if looks_like_workspace_path and not path_named:
+            raise ValueError(
+                f"environment variable {key} contains a workspace path; "
+                "declare it in env_path_keys"
+            )
+        effective_value = value
+        if path_named:
+            local_value, effective_value = _resolve_local_path(
+                value,
+                stable_root=stable_root,
+                mount_path=project_mount,
+                must_exist=False,
+            )
+            is_output = any(
+                local_value == output or _inside(local_value, output)
+                for output in output_roots
+            )
+            is_input = any(
+                local_value == input_path
+                or _inside(local_value, input_path)
+                or _inside(input_path, local_value)
+                for input_path in input_roots
+            )
+            if not is_output and not is_input:
+                raise ValueError(
+                    f"environment path must be declared in input_paths or output_paths: {key}"
+                )
+            if is_input and not is_output:
+                _, effective_value = _resolve_local_path(
+                    value,
+                    stable_root=stable_root,
+                    mount_path=project_mount,
+                    must_exist=True,
+                )
+        normalized[key] = effective_value
+        env_bytes += len(key.encode("utf-8")) + len(effective_value.encode("utf-8"))
+    if env_bytes > 8192:
+        raise ValueError("CPU Job environment exceeds 8192 UTF-8 bytes")
 
-
-def _quoted_candidates(text: str, suffix: str) -> set[str]:
-    candidates: set[str] = set()
-    if suffix == ".py":
-        try:
-            tree = ast.parse(text)
-        except SyntaxError:
-            tree = None
-        if tree is not None:
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                    if _looks_like_data_path(node.value):
-                        candidates.add(node.value)
-    for match in re.finditer(r'''["']([^"'\n]{1,1024})["']''', text):
-        value = match.group(1)
-        if _looks_like_data_path(value):
-            candidates.add(value)
-    return candidates
+    undeclared_values = sorted(set(normalized) - required_names - optional_names)
+    if undeclared_values:
+        raise ValueError(
+            "supplied environment variables must be classified in required_env_keys "
+            "or optional_env_keys: " + ", ".join(undeclared_values)
+        )
+    provided_by_platform = CPU_JOB_RESERVED_ENV | _IMPLICIT_ENV
+    if worker_index_env:
+        provided_by_platform.add(worker_index_env)
+    missing = sorted(
+        name
+        for name in required_names
+        if name not in normalized and name not in provided_by_platform
+    )
+    if missing:
+        raise ValueError(
+            "required CPU Job environment variables are not set: " + ", ".join(missing)
+        )
+    inventory = [
+        {
+            "name": name,
+            "required": name in required_names,
+            "providedBy": (
+                "platform"
+                if name in CPU_JOB_RESERVED_ENV or name in _IMPLICIT_ENV
+                else "worker-index-launcher"
+                if name == worker_index_env
+                else "request"
+                if name in normalized
+                else "optional-unset"
+            ),
+        }
+        for name in sorted(required_names | optional_names)
+    ]
+    return normalized, inventory
 
 
 def _translate_command_token(
@@ -170,6 +277,12 @@ def prepare_cpu_job(
     script_paths: list[str],
     input_paths: list[str],
     output_paths: list[str],
+    env: dict[str, str],
+    env_path_keys: list[str],
+    required_env_keys: list[str],
+    optional_env_keys: list[str],
+    independent_shards_confirmed: bool,
+    uses_native_completion_index: bool = False,
     worker_index_env: str | None = None,
     worker_index_argument: str | None = None,
     worker_index_base: int = 0,
@@ -191,6 +304,25 @@ def prepare_cpu_job(
         not worker_index_argument.strip() or "\x00" in worker_index_argument
     ):
         raise ValueError("worker_index_argument must be a non-empty token")
+    if shard_count > 1 and not independent_shards_confirmed:
+        raise ValueError(
+            "multi-shard jobs require an explicit model confirmation that shards "
+            "do not use live cross-worker coordination"
+        )
+    has_index_mapping = bool(worker_index_env or worker_index_argument)
+    if uses_native_completion_index and has_index_mapping:
+        raise ValueError(
+            "uses_native_completion_index cannot be combined with a worker index mapping"
+        )
+    if shard_count > 1 and not (uses_native_completion_index or has_index_mapping):
+        raise ValueError(
+            "multi-shard jobs must explicitly declare native JOB_COMPLETION_INDEX "
+            "use or define worker_index_env/worker_index_argument mapping"
+        )
+    if uses_native_completion_index and "JOB_COMPLETION_INDEX" not in required_env_keys:
+        raise ValueError(
+            "native JOB_COMPLETION_INDEX use must be declared in required_env_keys"
+        )
 
     job_dir = _manifest_dir(root, request_id)
     if (job_dir / "job.json").exists():
@@ -200,7 +332,6 @@ def prepare_cpu_job(
 
     local_scripts: list[str] = []
     job_scripts: list[str] = []
-    script_texts: list[tuple[str, str]] = []
     for raw in script_paths:
         local, job = _resolve_local_path(
             raw,
@@ -211,29 +342,8 @@ def prepare_cpu_job(
         )
         if local.stat().st_size > 2_000_000:
             raise ValueError(f"script/config is too large for preflight inspection: {raw}")
-        text = local.read_text(encoding="utf-8", errors="replace")
         local_scripts.append(str(local))
         job_scripts.append(job)
-        script_texts.append((local.suffix.lower(), text))
-
-    declared_script_set = {Path(value) for value in local_scripts}
-    for token in command:
-        candidate = token.split("=", 1)[1] if token.startswith("-") and "=" in token else token
-        if any(character.isspace() for character in candidate):
-            continue
-        if PurePosixPath(candidate).suffix.lower() not in _INSPECTED_COMMAND_SUFFIXES:
-            continue
-        local, _ = _resolve_local_path(
-            candidate,
-            stable_root=root,
-            mount_path=project_mount,
-            must_exist=True,
-            require_file=True,
-        )
-        if local not in declared_script_set:
-            raise ValueError(
-                f"command script/config must be declared in script_paths: {candidate}"
-            )
 
     local_inputs: list[str] = []
     job_inputs: list[str] = []
@@ -253,51 +363,20 @@ def prepare_cpu_job(
         local_outputs.append(str(local))
         job_outputs.append(job)
 
+    input_roots = [Path(value) for value in local_inputs]
     output_roots = [Path(value) for value in local_outputs]
-    discovered_paths: list[dict[str, str]] = []
-    for suffix, text in script_texts:
-        for candidate in sorted(_quoted_candidates(text, suffix)):
-            try:
-                local, job = _resolve_local_path(
-                    candidate,
-                    stable_root=root,
-                    mount_path=project_mount,
-                    must_exist=True,
-                )
-            except ValueError:
-                try:
-                    local, job = _resolve_local_path(
-                        candidate,
-                        stable_root=root,
-                        mount_path=project_mount,
-                        must_exist=False,
-                    )
-                except ValueError as exc:
-                    raise ValueError(
-                        f"script contains a data path that is not visible from "
-                        f"AI_SCIENTIST_STABLE_WORKSPACE_ROOT: {candidate}"
-                    ) from exc
-                if not any(local == output or _inside(local, output) for output in output_roots):
-                    raise ValueError(
-                        f"script path does not exist and was not declared as output: {candidate}"
-                    )
-            discovered_paths.append({"source": candidate, "jobPath": job})
 
-    combined_text = "\n".join(text for _, text in script_texts) + "\n" + " ".join(command)
-    unsupported = [
-        name for name, pattern in _COLLECTIVE_PATTERNS.items() if pattern.search(combined_text)
-    ]
-    if unsupported:
-        raise ValueError(
-            "K8s Indexed Job does not support cross-worker coordination: "
-            + ", ".join(unsupported)
-        )
-    if shard_count > 1 and not (worker_index_env or worker_index_argument):
-        if "JOB_COMPLETION_INDEX" not in combined_text:
-            raise ValueError(
-                "multi-shard jobs must use JOB_COMPLETION_INDEX directly or define "
-                "worker_index_env/worker_index_argument mapping"
-            )
+    prepared_env, environment_requirements = _prepare_environment(
+        env,
+        stable_root=root,
+        project_mount=project_mount,
+        worker_index_env=worker_index_env,
+        input_roots=input_roots,
+        output_roots=output_roots,
+        env_path_keys=env_path_keys,
+        required_env_keys=required_env_keys,
+        optional_env_keys=optional_env_keys,
+    )
 
     translated_command = [
         _translate_command_token(token, stable_root=root, mount_path=project_mount)
@@ -335,6 +414,12 @@ def prepare_cpu_job(
         "projectWorkspacePath": str(project_mount),
         "command": ["/bin/sh", launcher_job_path],
         "args": [],
+        "env": prepared_env,
+        "envPathKeys": env_path_keys,
+        "requiredEnvKeys": required_env_keys,
+        "optionalEnvKeys": optional_env_keys,
+        "independentShardsConfirmed": independent_shards_confirmed,
+        "environmentRequirements": environment_requirements,
         "launcherLocalPath": str(launcher),
         "launcherJobPath": launcher_job_path,
         "launcherSha256": launcher_sha256,
@@ -346,11 +431,11 @@ def prepare_cpu_job(
         "outputJobPaths": job_outputs,
         "workerIndex": {
             "source": "JOB_COMPLETION_INDEX",
+            "usesNativeCompletionIndex": uses_native_completion_index,
             "environmentVariable": worker_index_env,
             "argument": worker_index_argument,
             "base": worker_index_base,
         },
-        "discoveredPaths": discovered_paths,
     }
     manifest_path = job_dir / "preflight.json"
     temporary_manifest = manifest_path.with_suffix(".json.tmp")
@@ -367,8 +452,13 @@ def prepare_cpu_job(
         "scriptPaths": job_scripts,
         "inputPaths": job_inputs,
         "outputPaths": job_outputs,
+        "env": prepared_env,
+        "envPathKeys": env_path_keys,
+        "requiredEnvKeys": required_env_keys,
+        "optionalEnvKeys": optional_env_keys,
+        "independentShardsConfirmed": independent_shards_confirmed,
+        "environmentRequirements": environment_requirements,
         "workerIndex": manifest["workerIndex"],
-        "discoveredPaths": discovered_paths,
     }
 
 

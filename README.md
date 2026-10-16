@@ -31,10 +31,13 @@ Jobs without moving the Claude Code runtime.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 For distributed CPU work, the lifecycle is separate: validate scripts and
-stable-workspace paths, adapt K8s `JOB_COMPLETION_INDEX` to the index interface
-used by the user's script, estimate advisory capacity, obtain fixed user
-confirmation, submit the job, then monitor status/attempts/logs. K8s CPU jobs do
-not call `ensure_resource` and do not switch the current Claude Code container.
+model-declared stable-workspace input/output paths, adapt K8s
+`JOB_COMPLETION_INDEX` to the index interface
+used by the user's script, discover required environment variables, normalize
+directory variables to K8s project paths, estimate advisory capacity, obtain
+fixed user confirmation, submit the frozen preflight command/environment, then
+monitor status/attempts/logs. K8s CPU jobs do not call `ensure_resource` and do
+not switch the current Claude Code container.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
@@ -130,8 +133,9 @@ each Portal HTTP request, the plugin appends the method, URL, sanitized headers,
 and JSON body to `PLUGIN_LOG_DIR/portal_requests.jsonl`. Authorization is
 redacted. A logging failure prevents the Portal request from being sent.
 
-K8s CPU submissions use the normal (non-VIP) storage route and prefer a Portal
-execution profile; a pullable custom image is also accepted when required.
+K8s CPU submissions use the normal (non-VIP) storage route. They omit
+`executionProfile`; `image` is also omitted unless the user explicitly specifies
+a pullable custom image.
 Every declared input must exist beneath
 `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`, and every output must have a writable
 parent there. If the stable root is `/home/scientist/project123` and

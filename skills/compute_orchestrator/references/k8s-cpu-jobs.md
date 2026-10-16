@@ -17,9 +17,10 @@ workers on one physical node, so do not promise a node count.
   workers wait on an atomic marker in shared storage. Waiting must be bounded,
   idempotent, and fail on timeout. For a long singleton stage, submit it as a
   separate job before or after the parallel job instead of idling workers.
-- Prefer a Portal execution profile. A custom image is allowed only when needed
-  and must be pullable by K8s. The plugin rejects VIP jobs because current
-  stable-workspace visibility cannot prove access to the VIP volume.
+- Do not set `executionProfile`. Omit `image` unless the user explicitly names
+  a custom image; when explicitly supplied, it must be pullable by K8s. The
+  plugin rejects VIP jobs because current stable-workspace visibility cannot
+  prove access to the VIP volume.
 
 ## Required sequence
 
@@ -27,40 +28,57 @@ workers on one physical node, so do not promise a node count.
    environment requirements. Estimate shard count, maximum parallelism, CPU,
    memory, ephemeral storage, and deadline per worker. Use the smallest
    sufficient values; `parallelism` must not exceed `shardCount`.
-2. Call `prepare_cpu_job` before submission. Declare every script/config/input
-   and output. It must be readable or writable from
-   `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`; paths outside it fail closed. The tool
-   scans declared code for additional hard-coded paths, unsupported collectives,
-   and index use, then creates a verified launcher on stable storage. Never edit
-   the user's original script merely to submit it.
+2. Before calling `prepare_cpu_job`, use model reasoning to inspect every entry
+   script, imported wrapper, configuration, and command. Declare all inspected
+   files in `script_paths`, the complete business input/output set in
+   `input_paths`/`output_paths`, and every consumed environment variable in
+   exactly one of `required_env_keys` or `optional_env_keys`. Supply required
+   non-platform values in `env`. The plugin deliberately does not infer these
+   semantics from source strings or filename suffixes; it validates the model's
+   declarations, stable paths, and environment completeness. Never edit the
+   user's original script merely to submit it.
    In K8s, the project root is
    `K8S_CPU_MOUNT_PATH/<stable-workspace-directory-name>`: for example,
    `/home/scientist/project123/data/input.csv` maps to
    `/mnt/nas/project123/data/input.csv`, not `/mnt/nas/data/input.csv`.
-3. K8s provides the zero-based shard number only through
-   `JOB_COMPLETION_INDEX`. If user code reads that name directly, no mapping is
-   needed. Otherwise tell `prepare_cpu_job` the user's environment variable or
-   command-line argument and whether it expects base 0 or 1. The derived
-   launcher maps `JOB_COMPLETION_INDEX` to that interface for every worker.
-   Never assume a user variable is populated automatically.
-4. Prepare a reusable environment once on stable storage when needed. Workers
+3. Confirm through model reasoning that shards are independent and have no live
+   cross-worker coordination, then pass `independent_shards_confirmed=true`.
+   MPI, collectives, rendezvous, barriers, distributed runtimes, and a worker
+   depending on another live worker remain unsupported; do not call preparation
+   when any is used. K8s provides the zero-based shard number through
+   `JOB_COMPLETION_INDEX`. Set `uses_native_completion_index=true` only when user
+   code reads that exact variable and declare it required. Otherwise pass the
+   actual user interface as `worker_index_env` (for example `RANK`) or
+   `worker_index_argument`, plus base 0 or 1. The launcher maps the K8s index to
+   that interface. Never assume `RANK` or another user variable is populated
+   automatically.
+4. Confirm the returned environment inventory. Explicitly list every
+   path-valued environment variable in `env_path_keys`; do not infer path meaning
+   from its name. Required variables must be satisfied by the request, platform,
+   or worker-index launcher; optional variables may remain unset. The preflight
+   converts declared directory/file environment values from local
+   stable-workspace paths to
+   `K8S_CPU_MOUNT_PATH/<stable-workspace-directory-name>/...` and validates
+   input readability or output-parent writability. `submit_cpu_job` uses only
+   this frozen environment; never add or change variables at submission time.
+5. Prepare a reusable environment once on stable storage when needed. Workers
    may unpack/copy it to `/tmp`; do not let every worker concurrently mutate a
    shared Conda environment or install into shared site-packages. Never put
    secrets in job environment variables.
-5. Immediately before asking for consent, call
+6. Immediately before asking for consent, call
    `estimate_cpu_job_capacity`. Treat its result as advisory: capacity can
    change before scheduling. Do not disclose node names, exact free resources,
    or raw Portal responses.
-6. Execute `AskUserQuestion` with the fixed confirmation and options below.
+7. Execute `AskUserQuestion` with the fixed confirmation and options below.
    Only its affirmative option permits the matching `submit_cpu_job` call.
    Cancellation, free text, an old answer, or a changed request forbids
    submission.
-7. Submit with a unique `requestId`. On transport timeout, retry only with the
+8. Submit with a unique `requestId`. On transport timeout, retry only with the
    same ID and byte-equivalent request; otherwise query/list by the same ID.
-8. Poll `get_cpu_job` every 15–30 seconds while actively monitoring. Use
+9. Poll `get_cpu_job` every 15–30 seconds while actively monitoring. Use
    attempts and logs for diagnosis. A job is fully finished only when its state
    is terminal and `resourcesReleased == true`; do not wait for storage release.
-9. Verify declared outputs and per-shard completion records. Report failed
+10. Verify declared outputs and per-shard completion records. Report failed
    shards and retries without exposing infrastructure identifiers.
 
 ## Fixed submission confirmation

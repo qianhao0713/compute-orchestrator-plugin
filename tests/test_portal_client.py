@@ -286,7 +286,6 @@ async def test_cpu_job_endpoints_use_project_scope_and_log_requests(tmp_path):
     request = CpuJobSubmitRequest(
         requestId="request-1",
         sessionId="session-1",
-        executionProfile="python-cpu",
         command=["/bin/sh", "/mnt/nas/launch.sh"],
         shardCount=2,
         parallelism=2,
@@ -301,6 +300,8 @@ async def test_cpu_job_endpoints_use_project_scope_and_log_requests(tmp_path):
     sent = json.loads(submit_route.calls.last.request.content)
     assert sent["sessionId"] == "session-1"
     assert "projectId" not in sent
+    assert "executionProfile" not in sent
+    assert "image" not in sent
 
     records = [
         json.loads(line)

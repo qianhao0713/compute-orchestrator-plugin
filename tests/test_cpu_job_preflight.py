@@ -15,6 +15,12 @@ def _prepare(root: Path, **overrides):
         "script_paths": [str(root / "worker.py")],
         "input_paths": [str(root / "data.csv")],
         "output_paths": [str(root / "results")],
+        "env": {},
+        "env_path_keys": [],
+        "required_env_keys": ["SHARD_ID"],
+        "optional_env_keys": [],
+        "independent_shards_confirmed": True,
+        "uses_native_completion_index": False,
         "worker_index_env": "SHARD_ID",
         "worker_index_argument": None,
         "worker_index_base": 0,
@@ -70,10 +76,17 @@ def test_k8s_path_missing_project_directory_is_rejected(tmp_path):
 
 def test_preflight_maps_index_to_user_argument(tmp_path):
     root = _workspace(tmp_path)
+    (root / "worker.py").write_text(
+        'import argparse\nparser = argparse.ArgumentParser()\n'
+        'parser.add_argument("--rank", type=int, required=True)\n'
+        'print(parser.parse_args().rank)\n',
+        encoding="utf-8",
+    )
     result = _prepare(
         root,
         worker_index_env=None,
         worker_index_argument="--rank",
+        required_env_keys=[],
     )
     launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
     assert '--rank "$worker_index"' in launcher
@@ -84,39 +97,44 @@ def test_native_k8s_index_needs_no_mapping(tmp_path):
     (root / "worker.py").write_text(
         'import os\nprint(os.environ["JOB_COMPLETION_INDEX"])\n', encoding="utf-8"
     )
-    result = _prepare(root, worker_index_env=None)
+    result = _prepare(
+        root,
+        worker_index_env=None,
+        uses_native_completion_index=True,
+        required_env_keys=["JOB_COMPLETION_INDEX"],
+    )
     assert result["workerIndex"]["environmentVariable"] is None
 
 
-def test_multi_shard_job_rejects_missing_index_contract(tmp_path):
+def test_multi_shard_job_rejects_missing_explicit_index_contract(tmp_path):
     root = _workspace(tmp_path)
-    with pytest.raises(ValueError, match="must use JOB_COMPLETION_INDEX"):
-        _prepare(root, worker_index_env=None)
+    with pytest.raises(ValueError, match="must explicitly declare native"):
+        _prepare(root, worker_index_env=None, required_env_keys=[])
 
 
-def test_preflight_rejects_missing_hardcoded_data_path(tmp_path):
+def test_preflight_does_not_guess_input_output_paths_from_code(tmp_path):
     root = _workspace(tmp_path)
     (root / "worker.py").write_text(
         'from pathlib import Path\nPath("missing/input.csv").read_text()\n',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="not declared as output"):
-        _prepare(root)
+    result = _prepare(root)
+    assert "discoveredPaths" not in result
 
 
-def test_preflight_rejects_collective_runtime(tmp_path):
+def test_preflight_requires_model_confirmation_of_independent_shards(tmp_path):
     root = _workspace(tmp_path)
     (root / "worker.py").write_text(
         "import torch.distributed as dist\ndist.barrier()\n", encoding="utf-8"
     )
-    with pytest.raises(ValueError, match="cross-worker coordination"):
-        _prepare(root)
+    with pytest.raises(ValueError, match="explicit model confirmation"):
+        _prepare(root, independent_shards_confirmed=False)
 
 
-def test_preflight_requires_command_scripts_to_be_inspected(tmp_path):
+def test_preflight_does_not_guess_scripts_from_command_suffix(tmp_path):
     root = _workspace(tmp_path)
-    with pytest.raises(ValueError, match="declared in script_paths"):
-        _prepare(root, script_paths=[])
+    result = _prepare(root, script_paths=[])
+    assert result["scriptPaths"] == []
 
 
 def test_preflight_rejects_path_outside_stable_workspace(tmp_path):
@@ -135,3 +153,101 @@ def test_submit_gate_detects_modified_launcher(tmp_path):
         load_verified_preflight(
             stable_root=root, request_id="request-1", shard_count=4
         )
+
+
+def test_preflight_discovers_required_env_and_maps_directory_values(tmp_path):
+    root = _workspace(tmp_path)
+    data_dir = root / "dataset"
+    data_dir.mkdir()
+    (root / "worker.py").write_text(
+        'import os\n'
+        'print(os.environ["SHARD_ID"])\n'
+        'print(os.environ["DATA_DIR"])\n'
+        'print(os.environ["RUN_MODE"])\n'
+        'print(os.getenv("OPTIONAL_LABEL", "default"))\n',
+        encoding="utf-8",
+    )
+    result = _prepare(
+        root,
+        env={
+            "DATA_DIR": str(data_dir),
+            "RUN_MODE": "evaluate",
+            "OUTPUT_DIR": str(root / "results"),
+        },
+        input_paths=[str(root / "data.csv"), str(data_dir)],
+        env_path_keys=["DATA_DIR", "OUTPUT_DIR"],
+        required_env_keys=["SHARD_ID", "DATA_DIR", "RUN_MODE", "OUTPUT_DIR"],
+        optional_env_keys=["OPTIONAL_LABEL"],
+    )
+    assert result["env"] == {
+        "DATA_DIR": "/mnt/nas/project1/dataset",
+        "RUN_MODE": "evaluate",
+        "OUTPUT_DIR": "/mnt/nas/project1/results",
+    }
+    requirements = {item["name"]: item for item in result["environmentRequirements"]}
+    assert requirements["SHARD_ID"]["providedBy"] == "worker-index-launcher"
+    assert requirements["DATA_DIR"]["providedBy"] == "request"
+    assert requirements["RUN_MODE"]["required"] is True
+    assert requirements["OPTIONAL_LABEL"]["providedBy"] == "optional-unset"
+
+
+def test_preflight_rejects_missing_required_environment_variable(tmp_path):
+    root = _workspace(tmp_path)
+    (root / "worker.py").write_text(
+        'import os\nprint(os.environ["SHARD_ID"])\nprint(os.environ["RUN_MODE"])\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="RUN_MODE"):
+        _prepare(root, required_env_keys=["SHARD_ID", "RUN_MODE"])
+
+
+def test_preflight_rejects_undeclared_output_environment_path(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="input_paths or output_paths"):
+        _prepare(
+            root,
+            env={"OUTPUT_DIR": str(root / "other-results")},
+            env_path_keys=["OUTPUT_DIR"],
+            required_env_keys=["SHARD_ID", "OUTPUT_DIR"],
+        )
+
+
+def test_declared_custom_directory_variable_is_mapped_as_output(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(
+        root,
+        env={"CACHE_DIR": str(root / "results")},
+        env_path_keys=["CACHE_DIR"],
+        required_env_keys=["SHARD_ID", "CACHE_DIR"],
+    )
+    assert result["env"]["CACHE_DIR"] == "/mnt/nas/project1/results"
+
+
+def test_workspace_env_path_must_be_declared_by_model(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="declare it in env_path_keys"):
+        _prepare(
+            root,
+            env={"LOCATION": str(root / "data.csv")},
+            required_env_keys=["SHARD_ID", "LOCATION"],
+        )
+
+
+def test_rank_environment_is_a_supported_worker_index_contract(tmp_path):
+    root = _workspace(tmp_path)
+    (root / "worker.py").write_text(
+        'import os\nprint(os.environ["RANK"])\n', encoding="utf-8"
+    )
+    result = _prepare(
+        root,
+        worker_index_env="RANK",
+        required_env_keys=["RANK"],
+    )
+    launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
+    assert 'export RANK="$worker_index"' in launcher
+
+
+def test_supplied_environment_must_be_semantically_classified(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="must be classified"):
+        _prepare(root, env={"RUN_MODE": "evaluate"})

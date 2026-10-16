@@ -140,11 +140,13 @@ assume activation persists across tool calls.
 - Before every K8s CPU submission, run `prepare_cpu_job`, then
   `estimate_cpu_job_capacity`, show the exact language-matched fixed submission
   confirmation from [K8s CPU jobs](references/k8s-cpu-jobs.md), and submit only
-  after affirmative consent. Preparation must verify scripts, shard-index
-  adaptation, and every referenced input/output path under
-  `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. Never submit unsupported collective or
-  inter-worker communication code. Cancellation also requires its fixed
-  confirmation.
+  after affirmative consent. The model must determine and declare the complete
+  script/configuration, input/output, required/optional environment, independent-
+  shard, and worker-index contracts; do not rely on source-string or suffix
+  heuristics. Preparation validates those declarations and path mappings under
+  `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. Map `JOB_COMPLETION_INDEX` explicitly to
+  user variables such as `RANK`. Never submit collective or live inter-worker
+  communication code. Cancellation also requires its fixed confirmation.
 
 ## User-visible privacy
 

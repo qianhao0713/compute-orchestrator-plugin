@@ -83,6 +83,13 @@ async def test_submit_uses_verified_launcher_and_trusted_session(monkeypatch, tm
         script_paths=[str(root / "worker.py")],
         input_paths=[str(root / "input.csv")],
         output_paths=[str(root / "results")],
+        env={
+            "INPUT_FILE": str(root / "input.csv"),
+            "CACHE_DIR": str(root / "results"),
+        },
+        env_path_keys=["INPUT_FILE", "CACHE_DIR"],
+        required_env_keys=["MY_SHARD", "INPUT_FILE", "CACHE_DIR"],
+        independent_shards_confirmed=True,
         worker_index_env="MY_SHARD",
     )
 
@@ -92,16 +99,15 @@ async def test_submit_uses_verified_launcher_and_trusted_session(monkeypatch, tm
         parallelism=2,
         cpu_per_worker=2,
         memory_gib_per_worker=4,
-        execution_profile="python-cpu",
-        env={
-            "INPUT_FILE": "/mnt/nas/project7/input.csv",
-            "OUTPUT_DIR": "/mnt/nas/project7/results",
-        },
         session_id="trusted-session",
     )
 
     assert result["jobId"] == "job-1"
     assert client.submission.session_id == "trusted-session"
+    assert client.submission.env == {
+        "INPUT_FILE": "/mnt/nas/project7/input.csv",
+        "CACHE_DIR": "/mnt/nas/project7/results",
+    }
     assert client.submission.command[0] == "/bin/sh"
     assert client.submission.command[1].startswith(
         "/mnt/nas/project7/.compute-orchestrator/cpu-jobs/request-1/"
@@ -110,6 +116,12 @@ async def test_submit_uses_verified_launcher_and_trusted_session(monkeypatch, tm
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["request"]["sessionId"] == "trusted-session"
     assert record["request"]["cpu"] == 2
+    assert record["request"]["env"] == {
+        "INPUT_FILE": "/mnt/nas/project7/input.csv",
+        "CACHE_DIR": "/mnt/nas/project7/results",
+    }
+    assert "executionProfile" not in record["request"]
+    assert "image" not in record["request"]
     assert record["response"]["jobId"] == "job-1"
 
     with pytest.raises(ValueError, match="exact original request"):
@@ -119,11 +131,6 @@ async def test_submit_uses_verified_launcher_and_trusted_session(monkeypatch, tm
             parallelism=2,
             cpu_per_worker=3,
             memory_gib_per_worker=4,
-            execution_profile="python-cpu",
-            env={
-                "INPUT_FILE": "/mnt/nas/project7/input.csv",
-                "OUTPUT_DIR": "/mnt/nas/project7/results",
-            },
             session_id="trusted-session",
         )
 
@@ -139,7 +146,6 @@ async def test_submit_without_preflight_fails_closed(monkeypatch, tmp_path):
             parallelism=2,
             cpu_per_worker=1,
             memory_gib_per_worker=2,
-            execution_profile="python-cpu",
             session_id="trusted-session",
         )
 
@@ -148,23 +154,17 @@ async def test_submit_without_preflight_fails_closed(monkeypatch, tmp_path):
 async def test_submit_rejects_env_path_without_project_directory(monkeypatch, tmp_path):
     root = _workspace(tmp_path)
     monkeypatch.setattr(server, "settings", lambda: _settings(root))
-    server.prepare_cpu_job(
-        request_id="request-2",
-        command=["python", str(root / "worker.py")],
-        shard_count=2,
-        script_paths=[str(root / "worker.py")],
-        input_paths=[str(root / "input.csv")],
-        output_paths=[str(root / "results")],
-        worker_index_env="MY_SHARD",
-    )
-    with pytest.raises(ValueError, match="must be under /mnt/nas/project7"):
-        await server.submit_cpu_job(
+    with pytest.raises(ValueError, match="missing or unreadable|escapes"):
+        server.prepare_cpu_job(
             request_id="request-2",
+            command=["python", str(root / "worker.py")],
             shard_count=2,
-            parallelism=2,
-            cpu_per_worker=1,
-            memory_gib_per_worker=2,
-            execution_profile="python-cpu",
+            script_paths=[str(root / "worker.py")],
+            input_paths=[str(root / "input.csv")],
+            output_paths=[str(root / "results")],
             env={"INPUT_FILE": "/mnt/nas/input.csv"},
-            session_id="trusted-session",
+            env_path_keys=["INPUT_FILE"],
+            required_env_keys=["MY_SHARD", "INPUT_FILE"],
+            independent_shards_confirmed=True,
+            worker_index_env="MY_SHARD",
         )
