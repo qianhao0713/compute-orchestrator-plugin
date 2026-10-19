@@ -38,8 +38,10 @@ directory variables to K8s project paths, estimate advisory capacity, obtain
 fixed user confirmation, submit the frozen preflight command/environment, then
 monitor status/attempts/logs. K8s CPU jobs do not call `ensure_resource` and do
 not switch the current Claude Code container. Install additional Python packages
-locally with `/home/scientist/.venv/bin/python -m pip` before preflight; K8s uses
-the same interpreter and shared virtual environment path.
+locally with `/home/scientist/.venv/bin/python -m pip install --ignore-installed`
+before preflight; K8s uses the same interpreter and shared virtual environment
+path. Each worker repairs `.venv/bin/python3.12` to target
+`/opt/conda/bin/python3` before launching the workload.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:

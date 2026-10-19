@@ -42,7 +42,7 @@ workers on one physical node, so do not promise a node count.
    `/home/scientist/project123/data/input.csv` inside the worker.
    For Python workloads, use `/home/scientist/.venv/bin/python`. If imports are
    missing, install the smallest compatible dependency set locally first with
-   `/home/scientist/.venv/bin/python -m pip install ...`, then verify imports and
+   `/home/scientist/.venv/bin/python -m pip install --ignore-installed ...`, then verify imports and
    the executable path with that same interpreter. Launch Python scripts through
    that interpreter rather than relying on a script shebang. Do not create or use
    Conda.
@@ -67,7 +67,10 @@ workers on one physical node, so do not promise a node count.
    this frozen environment; never add or change variables at submission time.
 5. Finish dependency installation before submission. Workers must not run pip or
    mutate the shared `.venv`; they only execute the environment prepared in the
-   current container. Never put secrets in job environment variables.
+   current container. The generated launcher first replaces
+   `/home/scientist/.venv/bin/python3.12` with a symlink to
+   `/opt/conda/bin/python3`, because the local `/usr/bin/python3.12` target is not
+   available in K8s. Never put secrets in job environment variables.
 6. Immediately before asking for consent, call
    `estimate_cpu_job_capacity`. Treat its result as advisory: capacity can
    change before scheduling. Do not disclose node names, exact free resources,

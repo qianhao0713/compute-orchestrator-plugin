@@ -1,4 +1,7 @@
-from hooks.block_portal_bash import is_direct_portal_request
+from hooks.block_portal_bash import (
+    build_hook_output as build_bash_hook_output,
+    is_direct_portal_request,
+)
 from hooks.inject_session_id import build_hook_output
 
 
@@ -32,3 +35,33 @@ def test_direct_k8s_portal_request_is_blocked():
     assert is_direct_portal_request(
         "curl https://portal.example/scientist/project/1001/jobs/resources"
     )
+
+
+def test_venv_dependency_install_requires_ignore_installed():
+    denied = build_bash_hook_output(
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "/home/scientist/.venv/bin/python -m pip install pandas"
+                )
+            },
+        },
+        gpu_96g_runtime=False,
+    )
+    allowed = build_bash_hook_output(
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "/home/scientist/.venv/bin/python -m pip install "
+                    "--ignore-installed pandas"
+                )
+            },
+        },
+        gpu_96g_runtime=False,
+    )
+
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "--ignore-installed" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+    assert allowed == {}

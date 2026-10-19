@@ -21,6 +21,8 @@ _PYTHON_EXECUTABLE_PATTERN = re.compile(r"python(?:\d+(?:\.\d+)*)?", re.I)
 _PYTHON_VENV_ENTRYPOINTS = {"pip", "pip3", "pytest", "torchrun"}
 _K8S_PYTHON_EXECUTABLE = "/home/scientist/.venv/bin/python"
 _K8S_VIRTUAL_ENV = "/home/scientist/.venv"
+_K8S_PYTHON312_LINK = "/home/scientist/.venv/bin/python3.12"
+_K8S_BASE_PYTHON = "/opt/conda/bin/python3"
 _IMPLICIT_ENV = {
     "HOME", "HOSTNAME", "LANG", "LC_ALL", "LOGNAME", "PATH", "PWD",
     "PYTHONPATH", "SHLVL", "TMPDIR", "USER",
@@ -406,6 +408,8 @@ def prepare_cpu_job(
     lines = [
         "#!/bin/sh",
         "set -eu",
+        f"rm -f {shlex.quote(_K8S_PYTHON312_LINK)}",
+        f"ln -s {shlex.quote(_K8S_BASE_PYTHON)} {shlex.quote(_K8S_PYTHON312_LINK)}",
         f"export VIRTUAL_ENV={shlex.quote(_K8S_VIRTUAL_ENV)}",
         f"export PATH={shlex.quote(_K8S_VIRTUAL_ENV + '/bin')}:$PATH",
         "unset PYTHONHOME || true",
@@ -429,8 +433,9 @@ def prepare_cpu_job(
     manifest = {
         "requestId": request_id,
         "shardCount": shard_count,
-        "pathMapping": "identity-venv-v2",
+        "pathMapping": "identity-venv-python312-v3",
         "pythonExecutable": _K8S_PYTHON_EXECUTABLE,
+        "python312Target": _K8S_BASE_PYTHON,
         "mountPath": str(mount_base),
         "projectWorkspacePath": str(project_mount),
         "command": ["/bin/sh", launcher_job_path],
@@ -495,8 +500,9 @@ def load_verified_preflight(
     if manifest.get("requestId") != request_id or manifest.get("shardCount") != shard_count:
         raise ValueError("prepared request does not match request_id and shard_count")
     if (
-        manifest.get("pathMapping") != "identity-venv-v2"
+        manifest.get("pathMapping") != "identity-venv-python312-v3"
         or manifest.get("pythonExecutable") != _K8S_PYTHON_EXECUTABLE
+        or manifest.get("python312Target") != _K8S_BASE_PYTHON
         or manifest.get("projectWorkspacePath") != str(root)
     ):
         raise ValueError(

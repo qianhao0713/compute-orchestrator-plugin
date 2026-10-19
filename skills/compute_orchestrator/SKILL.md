@@ -146,7 +146,8 @@ retired Conda environment.
   heuristics. Preparation validates those declarations and path mappings under
   `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. Map `JOB_COMPLETION_INDEX` explicitly to
   user variables such as `RANK`. Before preparation, install any additional
-  Python packages locally with `/home/scientist/.venv/bin/python -m pip` and
+  Python packages locally with
+  `/home/scientist/.venv/bin/python -m pip install --ignore-installed ...` and
   verify imports with that interpreter. K8s must use the same fixed interpreter;
   never create or select a Conda environment. Never submit collective or live inter-worker
   communication code. Cancellation also requires its fixed confirmation.

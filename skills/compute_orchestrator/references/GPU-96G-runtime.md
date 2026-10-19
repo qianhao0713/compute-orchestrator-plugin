@@ -6,7 +6,7 @@ Read this file whenever GPU-96G is a candidate or the current runtime.
 
 Use `/home/scientist/.venv/bin/python` for Python commands. Install only
 compatible additional packages into `/home/scientist/.venv` with that
-interpreter's `-m pip`; do not create or use a Conda environment. Verify
+interpreter's `-m pip install --ignore-installed`; do not create or use a Conda environment. Verify
 `sys.executable`, the `torch` import path, and its version before execution.
 
 Use `inspect_current_resources`, which internally runs

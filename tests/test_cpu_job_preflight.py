@@ -50,6 +50,11 @@ def test_preflight_maps_k8s_index_to_user_environment(tmp_path):
     assert 'export SHARD_ID="$worker_index"' in launcher
     assert "export VIRTUAL_ENV=/home/scientist/.venv" in launcher
     assert "export PATH=/home/scientist/.venv/bin:$PATH" in launcher
+    assert "rm -f /home/scientist/.venv/bin/python3.12" in launcher
+    assert (
+        "ln -s /opt/conda/bin/python3 /home/scientist/.venv/bin/python3.12"
+        in launcher
+    )
     assert "exec /home/scientist/.venv/bin/python " in launcher
     assert str(root / "worker.py") in launcher
     assert f"cd {root}" in launcher

@@ -42,6 +42,11 @@ SAFE_XPU_SMI_PATTERN = re.compile(
     r"xpu-smi\s+-q\s+-d\s+MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS",
     re.I,
 )
+VENV_PIP_INSTALL_PATTERN = re.compile(
+    r"(?:/home/scientist/\.venv/bin/python(?:\d+(?:\.\d+)*)?\s+-m\s+pip|"
+    r"/home/scientist/\.venv/bin/pip\d*)\s+install\b",
+    re.I,
+)
 UNSUPPORTED_OPERATOR_PATTERN = re.compile(
     r"\b(?:complex64|complex128|float8_e4m3fn|float8_e5m2|"
     r"view_as_complex|view_as_real|to_sparse|sparse_coo_tensor|"
@@ -72,6 +77,11 @@ SMI_DENIAL = (
     "identifiers. Use the res inspect_current_resources MCP tool, or the exact "
     "safe name-free nvidia-smi or xpu-smi query. Never request or print device "
     "names, UUIDs, serial numbers, or raw diagnostic tables."
+)
+VENV_PIP_DENIAL = (
+    "Dependency installation into /home/scientist/.venv must include "
+    "--ignore-installed so packages are written into the shared virtual "
+    "environment instead of being satisfied by system site-packages."
 )
 
 
@@ -152,6 +162,23 @@ def contains_known_unsupported_operator(command: str, cwd: str | None = None) ->
     )
 
 
+def contains_venv_pip_install_without_ignore(
+    command: str, cwd: str | None = None
+) -> bool:
+    texts = [command, *_script_texts(command, cwd)]
+    for text in texts:
+        for segment in re.split(r"(?:&&|\|\||[;|\n])", text):
+            if not VENV_PIP_INSTALL_PATTERN.search(segment):
+                continue
+            try:
+                tokens = shlex.split(segment, comments=False, posix=True)
+            except ValueError:
+                tokens = segment.split()
+            if "--ignore-installed" not in tokens:
+                return True
+    return False
+
+
 def is_gpu_96g_runtime() -> bool:
     for name in ("GPU_TYPE", "CLUSTER_TYPE", "PORTAL_GPU_TYPE"):
         value = os.environ.get(name, "").strip().lower()
@@ -196,6 +223,8 @@ def build_hook_output(
         return _deny(SMI_DENIAL)
     if is_direct_portal_request(command):
         return _deny(PORTAL_DENIAL)
+    if contains_venv_pip_install_without_ignore(command, cwd):
+        return _deny(VENV_PIP_DENIAL)
 
     on_gpu_96g = is_gpu_96g_runtime() if gpu_96g_runtime is None else gpu_96g_runtime
     if on_gpu_96g and contains_known_unsupported_operator(command, cwd):
