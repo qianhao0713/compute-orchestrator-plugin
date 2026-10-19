@@ -49,7 +49,7 @@ def test_gpu_96g_context_routes_to_runtime_and_llm_references():
 def test_gpu_96g_context_routes_non_llm_checks_to_reference():
     context = _context("用GPU-96G训练YOLO")
     assert "classify LLM versus non-LLM" in context
-    assert "named Conda environment" in context
+    assert "fixed .venv runtime" in context
     assert "dependency boundary" in context
     assert "built-in operator checklist" in context
 

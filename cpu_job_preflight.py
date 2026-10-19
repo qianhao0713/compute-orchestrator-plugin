@@ -17,6 +17,10 @@ from models import (
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+_PYTHON_EXECUTABLE_PATTERN = re.compile(r"python(?:\d+(?:\.\d+)*)?", re.I)
+_PYTHON_VENV_ENTRYPOINTS = {"pip", "pip3", "pytest", "torchrun"}
+_K8S_PYTHON_EXECUTABLE = "/home/scientist/.venv/bin/python"
+_K8S_VIRTUAL_ENV = "/home/scientist/.venv"
 _IMPLICIT_ENV = {
     "HOME", "HOSTNAME", "LANG", "LC_ALL", "LOGNAME", "PATH", "PWD",
     "PYTHONPATH", "SHLVL", "TMPDIR", "USER",
@@ -261,6 +265,16 @@ def _translate_command_token(
     return token
 
 
+def _normalize_python_executable(command: list[str]) -> list[str]:
+    normalized = list(command)
+    executable_name = PurePosixPath(command[0]).name
+    if _PYTHON_EXECUTABLE_PATTERN.fullmatch(executable_name):
+        normalized[0] = _K8S_PYTHON_EXECUTABLE
+    elif executable_name in _PYTHON_VENV_ENTRYPOINTS:
+        normalized[0] = f"{_K8S_VIRTUAL_ENV}/bin/{executable_name}"
+    return normalized
+
+
 def _manifest_dir(stable_root: Path, request_id: str) -> Path:
     if _REQUEST_ID_PATTERN.fullmatch(request_id) is None:
         raise ValueError("request_id must be 1-64 safe filename characters")
@@ -290,7 +304,7 @@ def prepare_cpu_job(
     root = stable_root.expanduser().resolve(strict=True)
     mount_base = PurePosixPath(mount_path)
     if not mount_base.is_absolute():
-        raise ValueError("K8S_CPU_MOUNT_PATH must be absolute")
+        raise ValueError("K8s workspace parent path must be absolute")
     project_mount = mount_base / root.name
     if not command or len(command) > 64 or any(not isinstance(v, str) or not v for v in command):
         raise ValueError("command must contain 1-64 non-empty string tokens")
@@ -378,10 +392,12 @@ def prepare_cpu_job(
         optional_env_keys=optional_env_keys,
     )
 
-    translated_command = [
-        _translate_command_token(token, stable_root=root, mount_path=project_mount)
-        for token in command
-    ]
+    translated_command = _normalize_python_executable(
+        [
+            _translate_command_token(token, stable_root=root, mount_path=project_mount)
+            for token in command
+        ]
+    )
     job_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     launcher = job_dir / "launch.sh"
     launcher_job_path = str(
@@ -390,6 +406,9 @@ def prepare_cpu_job(
     lines = [
         "#!/bin/sh",
         "set -eu",
+        f"export VIRTUAL_ENV={shlex.quote(_K8S_VIRTUAL_ENV)}",
+        f"export PATH={shlex.quote(_K8S_VIRTUAL_ENV + '/bin')}:$PATH",
+        "unset PYTHONHOME || true",
         f"cd {shlex.quote(str(project_mount))}",
         'raw_index="${JOB_COMPLETION_INDEX:?JOB_COMPLETION_INDEX is required}"',
         f'worker_index="$((raw_index + {worker_index_base}))"',
@@ -410,6 +429,8 @@ def prepare_cpu_job(
     manifest = {
         "requestId": request_id,
         "shardCount": shard_count,
+        "pathMapping": "identity-venv-v2",
+        "pythonExecutable": _K8S_PYTHON_EXECUTABLE,
         "mountPath": str(mount_base),
         "projectWorkspacePath": str(project_mount),
         "command": ["/bin/sh", launcher_job_path],
@@ -473,6 +494,15 @@ def load_verified_preflight(
         raise ValueError("prepare_cpu_job must succeed before submit_cpu_job") from exc
     if manifest.get("requestId") != request_id or manifest.get("shardCount") != shard_count:
         raise ValueError("prepared request does not match request_id and shard_count")
+    if (
+        manifest.get("pathMapping") != "identity-venv-v2"
+        or manifest.get("pythonExecutable") != _K8S_PYTHON_EXECUTABLE
+        or manifest.get("projectWorkspacePath") != str(root)
+    ):
+        raise ValueError(
+            "prepared CPU job uses an obsolete workspace or Python runtime; run "
+            "prepare_cpu_job again"
+        )
     launcher = Path(str(manifest.get("launcherLocalPath", "")))
     try:
         launcher_resolved = launcher.resolve(strict=True)

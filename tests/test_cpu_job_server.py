@@ -105,20 +105,20 @@ async def test_submit_uses_verified_launcher_and_trusted_session(monkeypatch, tm
     assert result["jobId"] == "job-1"
     assert client.submission.session_id == "trusted-session"
     assert client.submission.env == {
-        "INPUT_FILE": "/mnt/nas/project7/input.csv",
-        "CACHE_DIR": "/mnt/nas/project7/results",
+        "INPUT_FILE": str(root / "input.csv"),
+        "CACHE_DIR": str(root / "results"),
     }
     assert client.submission.command[0] == "/bin/sh"
     assert client.submission.command[1].startswith(
-        "/mnt/nas/project7/.compute-orchestrator/cpu-jobs/request-1/"
+        str(root / ".compute-orchestrator/cpu-jobs/request-1/")
     )
     record_path = root / ".compute-orchestrator/cpu-jobs/request-1/job.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["request"]["sessionId"] == "trusted-session"
     assert record["request"]["cpu"] == 2
     assert record["request"]["env"] == {
-        "INPUT_FILE": "/mnt/nas/project7/input.csv",
-        "CACHE_DIR": "/mnt/nas/project7/results",
+        "INPUT_FILE": str(root / "input.csv"),
+        "CACHE_DIR": str(root / "results"),
     }
     assert "executionProfile" not in record["request"]
     assert "image" not in record["request"]
@@ -162,7 +162,7 @@ async def test_submit_rejects_env_path_without_project_directory(monkeypatch, tm
             script_paths=[str(root / "worker.py")],
             input_paths=[str(root / "input.csv")],
             output_paths=[str(root / "results")],
-            env={"INPUT_FILE": "/mnt/nas/input.csv"},
+            env={"INPUT_FILE": str(root.parent / "input.csv")},
             env_path_keys=["INPUT_FILE"],
             required_env_keys=["MY_SHARD", "INPUT_FILE"],
             independent_shards_confirmed=True,

@@ -101,9 +101,9 @@ or estimate an exact remaining-card count.
 
 Whenever GPU-96G is current or a candidate, read
 [GPU-96G runtime](references/GPU-96G-runtime.md) before planning, installing, or
-executing. Unconditionally use its `python310_torch29_cuda` environment in every
-Python, pip, torchrun, launcher, smoke-test, and workload shell command; never
-assume activation persists across tool calls.
+executing. Use `/home/scientist/.venv/bin/python` for Python commands and install
+only compatible additional packages into `/home/scientist/.venv`; do not use the
+retired Conda environment.
 
 - LLM: read [GPU-96G model training](references/GPU-96G-training.md). Use the
   fixed `nhmegatron` environment/code and an official local template; never
@@ -145,7 +145,10 @@ assume activation persists across tool calls.
   shard, and worker-index contracts; do not rely on source-string or suffix
   heuristics. Preparation validates those declarations and path mappings under
   `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. Map `JOB_COMPLETION_INDEX` explicitly to
-  user variables such as `RANK`. Never submit collective or live inter-worker
+  user variables such as `RANK`. Before preparation, install any additional
+  Python packages locally with `/home/scientist/.venv/bin/python -m pip` and
+  verify imports with that interpreter. K8s must use the same fixed interpreter;
+  never create or select a Conda environment. Never submit collective or live inter-worker
   communication code. Cancellation also requires its fixed confirmation.
 
 ## User-visible privacy

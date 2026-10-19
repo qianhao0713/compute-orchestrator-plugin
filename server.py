@@ -222,10 +222,7 @@ def _validate_cpu_job_env_paths(
     env_path_keys: list[str],
 ) -> None:
     root = current_settings.stable_workspace_root.resolve(strict=True)
-    mount = (
-        PurePosixPath(current_settings.cpu_job_mount_path)
-        / current_settings.stable_workspace_root.name
-    )
+    mount = PurePosixPath(str(root))
     output_roots = [PurePosixPath(value) for value in output_job_paths]
     for key in env_path_keys:
         value = env.get(key)
@@ -331,12 +328,13 @@ def prepare_cpu_job(
     environment variable/argument, classify all consumed environment variables
     as required or optional, and list all scripts/configuration and business
     input/output paths. The plugin validates those declarations and creates a
-    launcher without modifying user source.
+    launcher without modifying user source. Python commands run through
+    /home/scientist/.venv/bin/python, with that virtual environment first on PATH.
     """
     current_settings = settings()
     return prepare_cpu_job_files(
         stable_root=current_settings.stable_workspace_root,
-        mount_path=current_settings.cpu_job_mount_path,
+        mount_path=str(current_settings.stable_workspace_root.parent),
         request_id=request_id,
         command=command,
         shard_count=shard_count,

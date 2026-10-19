@@ -87,7 +87,14 @@ class ResourceSpec(BaseModel):
         return self
 
 
-CPU_JOB_RESERVED_ENV = {"JOB_ID", "POD_UID", "JOB_COMPLETION_INDEX"}
+CPU_JOB_RESERVED_ENV = {
+    "JOB_ID",
+    "POD_UID",
+    "JOB_COMPLETION_INDEX",
+    "PATH",
+    "PYTHONHOME",
+    "VIRTUAL_ENV",
+}
 CPU_JOB_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 CPU_JOB_SECRET_ENV_PATTERN = re.compile(
     r"(?:^|_)(?:ACCESS_?TOKEN|REFRESH_?TOKEN|TOKEN|SECRET|PASSWORD|PASSWD|"

@@ -13,7 +13,6 @@ import sys
 from typing import Any
 
 
-GPU_96G_ENV = "python310_torch29_cuda"
 PORTAL_PATH_PATTERN = re.compile(
     r"/scientist/(?:deployment(?:/|\b)|project/[0-9]+/jobs(?:/|\b))",
     re.I,
@@ -43,16 +42,6 @@ SAFE_XPU_SMI_PATTERN = re.compile(
     r"xpu-smi\s+-q\s+-d\s+MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS",
     re.I,
 )
-PYTHON_COMMAND_PATTERN = re.compile(
-    r"(?:^|[;&|()\s])(?:python\d*(?:\.\d+)?|pip\d*|torchrun|"
-    r"deepspeed)(?:\s|$)",
-    re.I,
-)
-TRAINING_SCRIPT_PATTERN = re.compile(
-    r"\b(?:torchrun|deepspeed|pretrain|fine[ _-]?tun|training|"
-    r"xmegatron|nhmegatron)\b",
-    re.I,
-)
 UNSUPPORTED_OPERATOR_PATTERN = re.compile(
     r"\b(?:complex64|complex128|float8_e4m3fn|float8_e5m2|"
     r"view_as_complex|view_as_real|to_sparse|sparse_coo_tensor|"
@@ -60,14 +49,6 @@ UNSUPPORTED_OPERATOR_PATTERN = re.compile(
     r"torch\.sparse\.|torch\.quantization\.|"
     r"torch\.fft\.(?:fftn|rfft2|fftshift|ifftn|irfft2|rfftn|irfftn)\b|"
     r"""scatter_reduce\s*\([^\n]*reduce\s*=\s*['"]add['"]""",
-    re.I,
-)
-CONDA_RUN_PATTERN = re.compile(
-    rf"\bconda\s+run\b[^\n;&|]*\s(?:-n|--name)\s+{GPU_96G_ENV}\b",
-    re.I,
-)
-CONDA_ACTIVATE_PATTERN = re.compile(
-    rf"\bconda\s+activate\s+{GPU_96G_ENV}\b",
     re.I,
 )
 PORTAL_DENIAL = (
@@ -79,12 +60,6 @@ KILL_DENIAL = (
     "Broad process-killing commands are forbidden because they can terminate "
     "agent infrastructure. Copy the training script, replace broad kills with a "
     "training-only pattern, verify the copy, and run only that derived script."
-)
-ENV_DENIAL = (
-    "GPU-96G Python work must use the python310_torch29_cuda Conda environment. "
-    "Activate it in this same shell command or use "
-    "conda run -n python310_torch29_cuda; activation from an earlier tool call "
-    "is not trusted."
 )
 OPERATOR_DENIAL = (
     "The referenced GPU-96G workload contains a known unsupported PyTorch "
@@ -185,21 +160,6 @@ def is_gpu_96g_runtime() -> bool:
     return shutil.which("xpu-smi") is not None
 
 
-def _requires_gpu_96g_conda(command: str, cwd: str | None) -> bool:
-    if PYTHON_COMMAND_PATTERN.search(command):
-        return True
-    return any(TRAINING_SCRIPT_PATTERN.search(text) for text in _script_texts(command, cwd))
-
-
-def _uses_gpu_96g_conda(command: str, cwd: str | None) -> bool:
-    if CONDA_RUN_PATTERN.search(command) or CONDA_ACTIVATE_PATTERN.search(command):
-        return True
-    return any(
-        CONDA_RUN_PATTERN.search(text) or CONDA_ACTIVATE_PATTERN.search(text)
-        for text in _script_texts(command, cwd)
-    )
-
-
 def _deny(message: str) -> dict[str, Any]:
     return {
         "hookSpecificOutput": {
@@ -240,12 +200,6 @@ def build_hook_output(
     on_gpu_96g = is_gpu_96g_runtime() if gpu_96g_runtime is None else gpu_96g_runtime
     if on_gpu_96g and contains_known_unsupported_operator(command, cwd):
         return _deny(OPERATOR_DENIAL)
-    if (
-        on_gpu_96g
-        and _requires_gpu_96g_conda(command, cwd)
-        and not _uses_gpu_96g_conda(command, cwd)
-    ):
-        return _deny(ENV_DENIAL)
     return {}
 
 

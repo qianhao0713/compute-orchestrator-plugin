@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from cpu_job_preflight import load_verified_preflight, prepare_cpu_job
 def _prepare(root: Path, **overrides):
     values = {
         "stable_root": root,
-        "mount_path": "/mnt/nas",
+        "mount_path": str(root.parent),
         "request_id": "request-1",
         "command": ["python", str(root / "worker.py")],
         "shard_count": 4,
@@ -47,11 +48,13 @@ def test_preflight_maps_k8s_index_to_user_environment(tmp_path):
     assert 'raw_index="${JOB_COMPLETION_INDEX:' in launcher
     assert 'worker_index="$((raw_index + 1))"' in launcher
     assert 'export SHARD_ID="$worker_index"' in launcher
-    assert f"{root}/worker.py" not in launcher
-    assert "/mnt/nas/project1/worker.py" in launcher
-    assert "cd /mnt/nas/project1" in launcher
+    assert "export VIRTUAL_ENV=/home/scientist/.venv" in launcher
+    assert "export PATH=/home/scientist/.venv/bin:$PATH" in launcher
+    assert "exec /home/scientist/.venv/bin/python " in launcher
+    assert str(root / "worker.py") in launcher
+    assert f"cd {root}" in launcher
     assert result["jobCommand"][1].startswith(
-        "/mnt/nas/project1/.compute-orchestrator/cpu-jobs/request-1/"
+        str(root / ".compute-orchestrator/cpu-jobs/request-1/")
     )
 
 
@@ -59,19 +62,19 @@ def test_k8s_project_path_maps_back_to_local_stable_root(tmp_path):
     root = _workspace(tmp_path)
     result = _prepare(
         root,
-        command=["python", "/mnt/nas/project1/worker.py"],
-        script_paths=["/mnt/nas/project1/worker.py"],
-        input_paths=["/mnt/nas/project1/data.csv"],
-        output_paths=["/mnt/nas/project1/results"],
+        command=["python", str(root / "worker.py")],
+        script_paths=[str(root / "worker.py")],
+        input_paths=[str(root / "data.csv")],
+        output_paths=[str(root / "results")],
     )
-    assert result["scriptPaths"] == ["/mnt/nas/project1/worker.py"]
-    assert result["inputPaths"] == ["/mnt/nas/project1/data.csv"]
+    assert result["scriptPaths"] == [str(root / "worker.py")]
+    assert result["inputPaths"] == [str(root / "data.csv")]
 
 
 def test_k8s_path_missing_project_directory_is_rejected(tmp_path):
     root = _workspace(tmp_path)
     with pytest.raises(ValueError, match="missing or unreadable|escapes"):
-        _prepare(root, input_paths=["/mnt/nas/data.csv"])
+        _prepare(root, input_paths=[str(root.parent / "data.csv")])
 
 
 def test_preflight_maps_index_to_user_argument(tmp_path):
@@ -155,6 +158,39 @@ def test_submit_gate_detects_modified_launcher(tmp_path):
         )
 
 
+def test_submit_gate_rejects_obsolete_workspace_mapping(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(root)
+    manifest_path = Path(result["manifestPath"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["pathMapping"] = "legacy-prefix-v1"
+    manifest["projectWorkspacePath"] = f"/mnt/nas/{root.name}"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="obsolete workspace or Python runtime"):
+        load_verified_preflight(
+            stable_root=root, request_id="request-1", shard_count=4
+        )
+
+
+def test_preflight_replaces_explicit_system_python_with_shared_venv(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(root, command=["/usr/bin/python3", str(root / "worker.py")])
+
+    launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
+    assert "exec /home/scientist/.venv/bin/python " in launcher
+    assert "/usr/bin/python3" not in launcher
+
+
+def test_preflight_uses_shared_venv_torchrun_entrypoint(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(root, command=["/usr/bin/torchrun", str(root / "worker.py")])
+
+    launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
+    assert "exec /home/scientist/.venv/bin/torchrun " in launcher
+    assert "/usr/bin/torchrun" not in launcher
+
+
 def test_preflight_discovers_required_env_and_maps_directory_values(tmp_path):
     root = _workspace(tmp_path)
     data_dir = root / "dataset"
@@ -180,9 +216,9 @@ def test_preflight_discovers_required_env_and_maps_directory_values(tmp_path):
         optional_env_keys=["OPTIONAL_LABEL"],
     )
     assert result["env"] == {
-        "DATA_DIR": "/mnt/nas/project1/dataset",
+        "DATA_DIR": str(root / "dataset"),
         "RUN_MODE": "evaluate",
-        "OUTPUT_DIR": "/mnt/nas/project1/results",
+        "OUTPUT_DIR": str(root / "results"),
     }
     requirements = {item["name"]: item for item in result["environmentRequirements"]}
     assert requirements["SHARD_ID"]["providedBy"] == "worker-index-launcher"
@@ -220,7 +256,7 @@ def test_declared_custom_directory_variable_is_mapped_as_output(tmp_path):
         env_path_keys=["CACHE_DIR"],
         required_env_keys=["SHARD_ID", "CACHE_DIR"],
     )
-    assert result["env"]["CACHE_DIR"] == "/mnt/nas/project1/results"
+    assert result["env"]["CACHE_DIR"] == str(root / "results")
 
 
 def test_workspace_env_path_must_be_declared_by_model(tmp_path):

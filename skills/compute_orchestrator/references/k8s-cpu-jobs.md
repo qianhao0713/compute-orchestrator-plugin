@@ -37,10 +37,15 @@ workers on one physical node, so do not promise a node count.
    semantics from source strings or filename suffixes; it validates the model's
    declarations, stable paths, and environment completeness. Never edit the
    user's original script merely to submit it.
-   In K8s, the project root is
-   `K8S_CPU_MOUNT_PATH/<stable-workspace-directory-name>`: for example,
-   `/home/scientist/project123/data/input.csv` maps to
-   `/mnt/nas/project123/data/input.csv`, not `/mnt/nas/data/input.csv`.
+   Portal mounts the stable workspace into K8s at the same absolute path. For
+   example, `/home/scientist/project123/data/input.csv` remains
+   `/home/scientist/project123/data/input.csv` inside the worker.
+   For Python workloads, use `/home/scientist/.venv/bin/python`. If imports are
+   missing, install the smallest compatible dependency set locally first with
+   `/home/scientist/.venv/bin/python -m pip install ...`, then verify imports and
+   the executable path with that same interpreter. Launch Python scripts through
+   that interpreter rather than relying on a script shebang. Do not create or use
+   Conda.
 3. Confirm through model reasoning that shards are independent and have no live
    cross-worker coordination, then pass `independent_shards_confirmed=true`.
    MPI, collectives, rendezvous, barriers, distributed runtimes, and a worker
@@ -57,14 +62,12 @@ workers on one physical node, so do not promise a node count.
    from its name. Required variables must be satisfied by the request, platform,
    or worker-index launcher; optional variables may remain unset. The preflight
    converts declared directory/file environment values from local
-   stable-workspace paths to
-   `K8S_CPU_MOUNT_PATH/<stable-workspace-directory-name>/...` and validates
-   input readability or output-parent writability. `submit_cpu_job` uses only
+   stable-workspace paths to the identical K8s paths and validates input
+   readability or output-parent writability. `submit_cpu_job` uses only
    this frozen environment; never add or change variables at submission time.
-5. Prepare a reusable environment once on stable storage when needed. Workers
-   may unpack/copy it to `/tmp`; do not let every worker concurrently mutate a
-   shared Conda environment or install into shared site-packages. Never put
-   secrets in job environment variables.
+5. Finish dependency installation before submission. Workers must not run pip or
+   mutate the shared `.venv`; they only execute the environment prepared in the
+   current container. Never put secrets in job environment variables.
 6. Immediately before asking for consent, call
    `estimate_cpu_job_capacity`. Treat its result as advisory: capacity can
    change before scheduling. Do not disclose node names, exact free resources,

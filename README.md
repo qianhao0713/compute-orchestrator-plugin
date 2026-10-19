@@ -17,9 +17,9 @@ Jobs without moving the Claude Code runtime.
 6. Portal creates/switches the environment and submits `pendingRequest` to the new runtime.
 7. The new runtime verifies persisted artifacts, prepares machine-specific dependencies
    when required, smoke-tests, and executes the core computation. GPU-96G first
-   classifies work as LLM or non-LLM. It unconditionally uses
-   `python310_torch29_cuda` as the default Conda environment for all Python,
-   pip, torchrun, launcher, smoke-test, and workload commands. LLM training uses its fixed preinstalled
+   classifies work as LLM or non-LLM. It uses
+   `/home/scientist/.venv/bin/python` for Python and installs additional compatible
+   packages into that shared virtual environment before execution. LLM training uses its fixed preinstalled
    environment and an existing training script under the
    `nhmegatron` repository's `zj_examples/GPU-96G` path. If no local checkout
    exists, the agent first uses the plugin-bundled official example snapshot;
@@ -27,7 +27,7 @@ Jobs without moving the Claude Code runtime.
    same-family official example after a per-GPU VRAM budget; from-scratch GPU-96G
    training logic and launchers remain forbidden. Non-LLM GPU tasks are allowed
    only when their GPU path depends on no GPU library or runtime beyond the
-   the `python310_torch29_cuda` Conda environment's torch, which must never be replaced or shadowed.
+   shared `.venv` environment's torch, which must never be replaced or shadowed.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 For distributed CPU work, the lifecycle is separate: validate scripts and
@@ -37,7 +37,9 @@ used by the user's script, discover required environment variables, normalize
 directory variables to K8s project paths, estimate advisory capacity, obtain
 fixed user confirmation, submit the frozen preflight command/environment, then
 monitor status/attempts/logs. K8s CPU jobs do not call `ensure_resource` and do
-not switch the current Claude Code container.
+not switch the current Claude Code container. Install additional Python packages
+locally with `/home/scientist/.venv/bin/python -m pip` before preflight; K8s uses
+the same interpreter and shared virtual environment path.
 
 Portal exposes the 32 GiB resource class as `gpuType: "GPU-32G"`.
 GPU-32G requests must use one of the fixed `(GPU, CPU, RAM GiB)` tuples:
@@ -112,8 +114,6 @@ not loaded.
 export PORTAL_BASE_URL="https://portal.example.com"
 export PORTAL_ACCESS_TOKEN="..." # raw token or "Bearer ..." are both accepted
 export AI_SCIENTIST_STABLE_WORKSPACE_ROOT="/home/scientist/project{project_id}"
-# Optional K8s base mount containing project directories; defaults to /mnt/nas.
-# export K8S_CPU_MOUNT_PATH="/mnt/nas"
 # Optional; defaults to /home/scientist/.claude/logs/
 # export PLUGIN_LOG_DIR="/path/to/plugin/logs/"
 # Optional; defaults to false. Set true to send a continuation message.
@@ -138,11 +138,10 @@ K8s CPU submissions use the normal (non-VIP) storage route. They omit
 a pullable custom image.
 Every declared input must exist beneath
 `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`, and every output must have a writable
-parent there. If the stable root is `/home/scientist/project123` and
-`K8S_CPU_MOUNT_PATH=/mnt/nas`, K8s workers see the project at
-`/mnt/nas/project123`; relative paths are preserved below that directory. VIP
-jobs are rejected because the interactive container cannot verify their
-separate storage volume.
+parent there. Portal mounts the stable workspace into K8s at the same absolute
+path: `/home/scientist/project123/data/input.csv` remains
+`/home/scientist/project123/data/input.csv`. VIP jobs are rejected because the
+interactive container cannot verify their separate storage volume.
 
 `ENABLE_HANDOFF` accepts `true/false`, `1/0`, `yes/no`, or `on/off`. It
 defaults to `false`. When disabled, callers do not need to prepare continuation

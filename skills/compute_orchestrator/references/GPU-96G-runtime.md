@@ -4,12 +4,10 @@ Read this file whenever GPU-96G is a candidate or the current runtime.
 
 ## Environment
 
-Unconditionally use the `python310_torch29_cuda` Conda environment. Run every
-Python, pip, torchrun, launcher, smoke-test, and workload command by activating
-it in the same shell command or with `conda run -n python310_torch29_cuda`.
-Never assume activation persists across Claude Code tool calls. Never use base
-or another Conda environment. Verify `sys.executable`, the `torch` import path,
-and its version before execution.
+Use `/home/scientist/.venv/bin/python` for Python commands. Install only
+compatible additional packages into `/home/scientist/.venv` with that
+interpreter's `-m pip`; do not create or use a Conda environment. Verify
+`sys.executable`, the `torch` import path, and its version before execution.
 
 Use `inspect_current_resources`, which internally runs
 `xpu-smi -q -d MEMORY,UTILIZATION,TEMPERATURE,CLOCK,PIDS` and never exposes its
@@ -28,8 +26,8 @@ template, and never write the training loop or launcher from scratch.
 
 Allow an existing non-LLM task only when its complete execution path and direct
 and transitive dependencies neither introduce nor require a separate GPU
-runtime, backend, library implementation, or binary extension beyond the named
-environment's `torch`. Upper-level packages such as a YOLO implementation are
+runtime, backend, library implementation, or binary extension beyond the shared
+`.venv` environment's `torch`. Upper-level packages such as a YOLO implementation are
 allowed when all accelerator operations flow through that `torch`.
 
 Never install, upgrade, downgrade, replace, or shadow `torch`, including through

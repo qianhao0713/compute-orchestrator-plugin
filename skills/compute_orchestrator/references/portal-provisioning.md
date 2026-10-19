@@ -91,12 +91,11 @@ The server supplies `projectId`; the PreToolUse hook supplies authoritative
   stable paths, exact next command, dependencies, resource plan, expected
   outputs, and constraints. Never include credentials or temporary references.
 
-For GPU-96G, require `python310_torch29_cuda` in every shell command (or
-`conda run -n python310_torch29_cuda`) and verification of `sys.executable` and
-the `torch` path/version. For LLM work also name the official template and diff,
+For GPU-96G, require `/home/scientist/.venv/bin/python` and verification of
+`sys.executable` and the `torch` path/version. For LLM work also name the official template and diff,
 VRAM budget, `nhmegatron` constraint, and sanitized card-count check. For non-LLM
 work record dependency/operator eligibility and prohibit replacing that
-environment's `torch`.
+`.venv` environment's `torch`.
 
 ## Response and polling
 

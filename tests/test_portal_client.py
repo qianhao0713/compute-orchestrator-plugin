@@ -251,17 +251,6 @@ def test_empty_plugin_log_dir_is_rejected(monkeypatch, tmp_path):
         Settings.from_env()
 
 
-def test_k8s_mount_defaults_and_accepts_absolute_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("PORTAL_BASE_URL", "portal.example.com")
-    monkeypatch.setenv("PORTAL_ACCESS_TOKEN", "token")
-    monkeypatch.setenv("PORTAL_PROJECT_ID", "1")
-    monkeypatch.setenv("AI_SCIENTIST_STABLE_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.delenv("K8S_CPU_MOUNT_PATH", raising=False)
-    assert Settings.from_env().cpu_job_mount_path == "/mnt/nas"
-    monkeypatch.setenv("K8S_CPU_MOUNT_PATH", "/workspace/")
-    assert Settings.from_env().cpu_job_mount_path == "/workspace"
-
-
 @pytest.mark.asyncio
 @respx.mock
 async def test_cpu_job_endpoints_use_project_scope_and_log_requests(tmp_path):
@@ -286,7 +275,7 @@ async def test_cpu_job_endpoints_use_project_scope_and_log_requests(tmp_path):
     request = CpuJobSubmitRequest(
         requestId="request-1",
         sessionId="session-1",
-        command=["/bin/sh", "/mnt/nas/launch.sh"],
+        command=["/bin/sh", "/home/scientist/project1/launch.sh"],
         shardCount=2,
         parallelism=2,
         cpu=1,

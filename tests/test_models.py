@@ -139,7 +139,7 @@ def _cpu_job(**overrides):
     values = {
         "requestId": "cpu-job-1",
         "sessionId": "session-1",
-        "command": ["/bin/sh", "/mnt/nas/job/launch.sh"],
+        "command": ["/bin/sh", "/home/scientist/project1/launch.sh"],
         "shardCount": 4,
         "parallelism": 2,
         "cpu": 2,
