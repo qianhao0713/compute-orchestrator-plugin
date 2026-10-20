@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import cpu_job_preflight
 from cpu_job_preflight import load_verified_preflight, prepare_cpu_job
 
 
@@ -20,6 +21,7 @@ def _prepare(root: Path, **overrides):
         "env_path_keys": [],
         "required_env_keys": ["SHARD_ID"],
         "optional_env_keys": [],
+        "required_python_packages": [],
         "independent_shards_confirmed": True,
         "uses_native_completion_index": False,
         "worker_index_env": "SHARD_ID",
@@ -49,13 +51,16 @@ def test_preflight_maps_k8s_index_to_user_environment(tmp_path):
     assert 'worker_index="$((raw_index + 1))"' in launcher
     assert 'export SHARD_ID="$worker_index"' in launcher
     assert "export VIRTUAL_ENV=/home/scientist/.venv" in launcher
-    assert "export PATH=/home/scientist/.venv/bin:$PATH" in launcher
-    assert "rm -f /home/scientist/.venv/bin/python3.12" in launcher
+    assert "rm -f /home/scientist/.venv/bin/python3.12" not in launcher
+    assert "ln -s /opt/conda/bin/python3" not in launcher
+    assert "mktemp -d /tmp/k8s-python-bootstrap.XXXXXX" in launcher
     assert (
-        "ln -s /opt/conda/bin/python3 /home/scientist/.venv/bin/python3.12"
+        'site.addsitedir("/home/scientist/.venv/lib/python3.12/site-packages")'
         in launcher
     )
-    assert "exec /home/scientist/.venv/bin/python " in launcher
+    assert 'export PYTHONPATH="$python_bootstrap_dir' in launcher
+    assert "export PATH=/opt/conda/bin:$PATH" in launcher
+    assert "exec /opt/conda/bin/python3 " in launcher
     assert str(root / "worker.py") in launcher
     assert f"cd {root}" in launcher
     assert result["jobCommand"][1].startswith(
@@ -183,7 +188,7 @@ def test_preflight_replaces_explicit_system_python_with_shared_venv(tmp_path):
     result = _prepare(root, command=["/usr/bin/python3", str(root / "worker.py")])
 
     launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
-    assert "exec /home/scientist/.venv/bin/python " in launcher
+    assert "exec /opt/conda/bin/python3 " in launcher
     assert "/usr/bin/python3" not in launcher
 
 
@@ -192,8 +197,88 @@ def test_preflight_uses_shared_venv_torchrun_entrypoint(tmp_path):
     result = _prepare(root, command=["/usr/bin/torchrun", str(root / "worker.py")])
 
     launcher = Path(result["launcherPath"]).read_text(encoding="utf-8")
-    assert "exec /home/scientist/.venv/bin/torchrun " in launcher
+    assert "exec /opt/conda/bin/python3 -m torch.distributed.run " in launcher
     assert "/usr/bin/torchrun" not in launcher
+
+
+def test_preflight_rejects_pip_as_worker_command(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="workers must not run pip"):
+        _prepare(root, command=["pip", "install", "pandas"])
+    with pytest.raises(ValueError, match="workers must not run pip"):
+        _prepare(
+            root,
+            request_id="request-2",
+            command=["python", "-m", "pip", "install", "pandas"],
+        )
+
+
+def _write_distribution_metadata(
+    site_packages: Path, name: str, version: str
+) -> None:
+    metadata_dir = site_packages / f"{name.replace('-', '_')}-{version}.dist-info"
+    metadata_dir.mkdir(parents=True)
+    (metadata_dir / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+        encoding="utf-8",
+    )
+
+
+def test_preflight_inventories_packages_directly_from_shared_venv(
+    monkeypatch, tmp_path
+):
+    root = _workspace(tmp_path)
+    site_packages = tmp_path / "venv-site-packages"
+    _write_distribution_metadata(site_packages, "demo-pkg", "1.2.3")
+    monkeypatch.setattr(
+        cpu_job_preflight, "_K8S_SHARED_SITE_PACKAGES", str(site_packages)
+    )
+
+    result = _prepare(root, required_python_packages=["demo_pkg"])
+
+    assert result["pythonPackageInventory"] == [
+        {
+            "requestedName": "demo_pkg",
+            "distributionName": "demo-pkg",
+            "version": "1.2.3",
+        }
+    ]
+
+
+def test_preflight_rejects_package_only_available_outside_shared_venv(
+    monkeypatch, tmp_path
+):
+    root = _workspace(tmp_path)
+    site_packages = tmp_path / "empty-venv-site-packages"
+    site_packages.mkdir()
+    monkeypatch.setattr(
+        cpu_job_preflight, "_K8S_SHARED_SITE_PACKAGES", str(site_packages)
+    )
+
+    with pytest.raises(ValueError, match="not installed in the shared .venv"):
+        _prepare(root, required_python_packages=["pytest"])
+
+
+def test_submit_gate_detects_changed_shared_venv_package(
+    monkeypatch, tmp_path
+):
+    root = _workspace(tmp_path)
+    site_packages = tmp_path / "venv-site-packages"
+    _write_distribution_metadata(site_packages, "demo-pkg", "1.2.3")
+    monkeypatch.setattr(
+        cpu_job_preflight, "_K8S_SHARED_SITE_PACKAGES", str(site_packages)
+    )
+    _prepare(root, required_python_packages=["demo-pkg"])
+    metadata = next(site_packages.glob("*.dist-info/METADATA"))
+    metadata.write_text(
+        "Metadata-Version: 2.1\nName: demo-pkg\nVersion: 2.0.0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="changed after preflight"):
+        load_verified_preflight(
+            stable_root=root, request_id="request-1", shard_count=4
+        )
 
 
 def test_preflight_discovers_required_env_and_maps_directory_values(tmp_path):

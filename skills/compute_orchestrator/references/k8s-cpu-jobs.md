@@ -40,12 +40,20 @@ workers on one physical node, so do not promise a node count.
    Portal mounts the stable workspace into K8s at the same absolute path. For
    example, `/home/scientist/project123/data/input.csv` remains
    `/home/scientist/project123/data/input.csv` inside the worker.
-   For Python workloads, use `/home/scientist/.venv/bin/python`. If imports are
-   missing, install the smallest compatible dependency set locally first with
-   `/home/scientist/.venv/bin/python -m pip install --ignore-installed ...`, then verify imports and
-   the executable path with that same interpreter. Launch Python scripts through
-   that interpreter rather than relying on a script shebang. Do not create or use
-   Conda.
+   For local preparation, use `/home/scientist/.venv/bin/python`. If required
+   distributions are absent from the shared `.venv` inventory, install the
+   smallest compatible dependency set locally first with
+   `/home/scientist/.venv/bin/python -m pip install --ignore-installed ...`.
+   Determine the corresponding distribution names from project metadata or
+   requirements (for example, import `sklearn` maps to distribution
+   `scikit-learn`) and pass the complete list as `required_python_packages`.
+   `prepare_cpu_job` reads distribution metadata directly from
+   `/home/scientist/.venv/lib/python3.12/site-packages`; a normal import is never
+   accepted as proof of installation because it may resolve from system paths.
+   Launch Python scripts through
+   that interpreter rather than relying on a script shebang. Do not create or
+   activate a Conda environment; `/opt/conda/bin/python3` below is the platform's
+   fixed K8s base interpreter, not a task-selected environment.
 3. Confirm through model reasoning that shards are independent and have no live
    cross-worker coordination, then pass `independent_shards_confirmed=true`.
    MPI, collectives, rendezvous, barriers, distributed runtimes, and a worker
@@ -65,12 +73,18 @@ workers on one physical node, so do not promise a node count.
    stable-workspace paths to the identical K8s paths and validates input
    readability or output-parent writability. `submit_cpu_job` uses only
    this frozen environment; never add or change variables at submission time.
-5. Finish dependency installation before submission. Workers must not run pip or
+5. Finish dependency installation before submission. Confirm the returned
+   `pythonPackageInventory`; submission rechecks the same names and versions and
+   rejects a changed or missing shared `.venv` package. Workers must not run pip or
    mutate the shared `.venv`; they only execute the environment prepared in the
-   current container. The generated launcher first replaces
-   `/home/scientist/.venv/bin/python3.12` with a symlink to
-   `/opt/conda/bin/python3`, because the local `/usr/bin/python3.12` target is not
-   available in K8s. Never put secrets in job environment variables.
+   current container. K8s runs `/opt/conda/bin/python3`. Each Pod creates a
+   private `/tmp/k8s-python-bootstrap.*` directory whose `sitecustomize.py` calls
+   `site.addsitedir('/home/scientist/.venv/lib/python3.12/site-packages')`.
+   This processes `.pth` files without changing any shared `.venv` link. Use
+   `/opt/conda/bin/python3 -m pytest` and
+   `/opt/conda/bin/python3 -m torch.distributed.run` for those entrypoints.
+   Never set `PYTHONHOME`, mutate `.venv` during a running job, or put secrets in
+   job environment variables.
 6. Immediately before asking for consent, call
    `estimate_cpu_job_capacity`. Treat its result as advisory: capacity can
    change before scheduling. Do not disclose node names, exact free resources,

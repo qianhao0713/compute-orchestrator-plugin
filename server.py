@@ -315,6 +315,7 @@ def prepare_cpu_job(
     env_path_keys: list[str] | None = None,
     required_env_keys: list[str] | None = None,
     optional_env_keys: list[str] | None = None,
+    required_python_packages: list[str] | None = None,
     independent_shards_confirmed: bool = False,
     uses_native_completion_index: bool = False,
     worker_index_env: str | None = None,
@@ -328,8 +329,12 @@ def prepare_cpu_job(
     environment variable/argument, classify all consumed environment variables
     as required or optional, and list all scripts/configuration and business
     input/output paths. The plugin validates those declarations and creates a
-    launcher without modifying user source. Python commands run through
-    /home/scientist/.venv/bin/python, with that virtual environment first on PATH.
+    launcher without modifying user source. The model must declare required
+    Python distribution names; preparation verifies their metadata directly in
+    the shared .venv rather than accepting an import resolved from system paths.
+    K8s Python commands run through
+    /opt/conda/bin/python3 and load the shared .venv site-packages via a Pod-local
+    sitecustomize bootstrap; the shared virtual environment is never modified.
     """
     current_settings = settings()
     return prepare_cpu_job_files(
@@ -345,6 +350,9 @@ def prepare_cpu_job(
         env_path_keys=env_path_keys or [],
         required_env_keys=required_env_keys or [],
         optional_env_keys=optional_env_keys or [],
+        required_python_packages=(
+            [] if required_python_packages is None else required_python_packages
+        ),
         independent_shards_confirmed=independent_shards_confirmed,
         uses_native_completion_index=uses_native_completion_index,
         worker_index_env=worker_index_env,

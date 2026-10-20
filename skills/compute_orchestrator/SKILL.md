@@ -148,8 +148,14 @@ retired Conda environment.
   user variables such as `RANK`. Before preparation, install any additional
   Python packages locally with
   `/home/scientist/.venv/bin/python -m pip install --ignore-installed ...` and
-  verify imports with that interpreter. K8s must use the same fixed interpreter;
-  never create or select a Conda environment. Never submit collective or live inter-worker
+  pass every required distribution name (not import-module name) through
+  `required_python_packages`. Preparation and submission must verify package
+  metadata directly under the shared `.venv`; ordinary import success is not
+  proof because it may resolve from system site-packages. K8s must run
+  `/opt/conda/bin/python3`
+  with its Pod-local `sitecustomize` bootstrap loading the shared `.venv`
+  site-packages; never modify shared `.venv` links or install from a Worker.
+  Never submit collective or live inter-worker
   communication code. Cancellation also requires its fixed confirmation.
 
 ## User-visible privacy

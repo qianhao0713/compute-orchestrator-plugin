@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from importlib import metadata as importlib_metadata
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -18,11 +19,19 @@ from models import (
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _PYTHON_EXECUTABLE_PATTERN = re.compile(r"python(?:\d+(?:\.\d+)*)?", re.I)
-_PYTHON_VENV_ENTRYPOINTS = {"pip", "pip3", "pytest", "torchrun"}
-_K8S_PYTHON_EXECUTABLE = "/home/scientist/.venv/bin/python"
+_PYTHON_DISTRIBUTION_NAME_PATTERN = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$"
+)
+_PYTHON_MODULE_ENTRYPOINTS = {
+    "pytest": "pytest",
+    "torchrun": "torch.distributed.run",
+}
 _K8S_VIRTUAL_ENV = "/home/scientist/.venv"
-_K8S_PYTHON312_LINK = "/home/scientist/.venv/bin/python3.12"
 _K8S_BASE_PYTHON = "/opt/conda/bin/python3"
+_K8S_SHARED_SITE_PACKAGES = (
+    "/home/scientist/.venv/lib/python3.12/site-packages"
+)
+_K8S_PYTHON_PACKAGE_STRATEGY = "sitecustomize-addsitedir-v1"
 _IMPLICIT_ENV = {
     "HOME", "HOSTNAME", "LANG", "LC_ALL", "LOGNAME", "PATH", "PWD",
     "PYTHONPATH", "SHLVL", "TMPDIR", "USER",
@@ -271,10 +280,99 @@ def _normalize_python_executable(command: list[str]) -> list[str]:
     normalized = list(command)
     executable_name = PurePosixPath(command[0]).name
     if _PYTHON_EXECUTABLE_PATTERN.fullmatch(executable_name):
-        normalized[0] = _K8S_PYTHON_EXECUTABLE
-    elif executable_name in _PYTHON_VENV_ENTRYPOINTS:
-        normalized[0] = f"{_K8S_VIRTUAL_ENV}/bin/{executable_name}"
+        if len(command) >= 3 and command[1] == "-m" and command[2] in {"pip", "pip3"}:
+            raise ValueError(
+                "K8s workers must not run pip; install dependencies into the shared "
+                ".venv before prepare_cpu_job"
+            )
+        normalized[0] = _K8S_BASE_PYTHON
+    elif executable_name in {"pip", "pip3"}:
+        raise ValueError(
+            "K8s workers must not run pip; install dependencies into the shared "
+            ".venv before prepare_cpu_job"
+        )
+    elif executable_name in _PYTHON_MODULE_ENTRYPOINTS:
+        normalized = [
+            _K8S_BASE_PYTHON,
+            "-m",
+            _PYTHON_MODULE_ENTRYPOINTS[executable_name],
+            *command[1:],
+        ]
     return normalized
+
+
+def _normalized_distribution_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _inventory_required_python_packages(
+    required_python_packages: list[str],
+) -> list[dict[str, str]]:
+    """Inventory distributions installed specifically in the shared .venv."""
+    if not isinstance(required_python_packages, list):
+        raise ValueError("required_python_packages must be a list")
+    if len(required_python_packages) > 128:
+        raise ValueError("required_python_packages supports at most 128 entries")
+
+    requested: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for name in required_python_packages:
+        if (
+            not isinstance(name, str)
+            or _PYTHON_DISTRIBUTION_NAME_PATTERN.fullmatch(name) is None
+        ):
+            raise ValueError(
+                "required_python_packages entries must be Python distribution "
+                "names, without versions, extras, or import statements"
+            )
+        normalized = _normalized_distribution_name(name)
+        if normalized in seen:
+            raise ValueError(
+                "required_python_packages must not contain duplicate distribution names"
+            )
+        seen.add(normalized)
+        requested.append((name, normalized))
+
+    if not requested:
+        return []
+
+    site_packages = Path(_K8S_SHARED_SITE_PACKAGES)
+    if not site_packages.is_dir():
+        raise ValueError(
+            f"shared .venv site-packages is missing: {site_packages}; install "
+            "dependencies into /home/scientist/.venv with --ignore-installed"
+        )
+
+    installed: dict[str, dict[str, str]] = {}
+    try:
+        distributions = importlib_metadata.distributions(path=[str(site_packages)])
+        for distribution in distributions:
+            distribution_name = distribution.metadata.get("Name")
+            if not isinstance(distribution_name, str) or not distribution_name:
+                continue
+            version = distribution.version
+            if not isinstance(version, str) or not version:
+                continue
+            installed[_normalized_distribution_name(distribution_name)] = {
+                "distributionName": distribution_name,
+                "version": version,
+            }
+    except (OSError, ValueError) as exc:
+        raise ValueError("shared .venv package metadata is unreadable") from exc
+
+    missing = [name for name, normalized in requested if normalized not in installed]
+    if missing:
+        raise ValueError(
+            "required Python distributions are not installed in the shared .venv: "
+            + ", ".join(missing)
+            + "; install them with /home/scientist/.venv/bin/python -m pip "
+            "install --ignore-installed before prepare_cpu_job"
+        )
+
+    return [
+        {"requestedName": name, **installed[normalized]}
+        for name, normalized in requested
+    ]
 
 
 def _manifest_dir(stable_root: Path, request_id: str) -> Path:
@@ -297,6 +395,7 @@ def prepare_cpu_job(
     env_path_keys: list[str],
     required_env_keys: list[str],
     optional_env_keys: list[str],
+    required_python_packages: list[str],
     independent_shards_confirmed: bool,
     uses_native_completion_index: bool = False,
     worker_index_env: str | None = None,
@@ -393,6 +492,9 @@ def prepare_cpu_job(
         required_env_keys=required_env_keys,
         optional_env_keys=optional_env_keys,
     )
+    python_package_inventory = _inventory_required_python_packages(
+        required_python_packages
+    )
 
     translated_command = _normalize_python_executable(
         [
@@ -408,10 +510,17 @@ def prepare_cpu_job(
     lines = [
         "#!/bin/sh",
         "set -eu",
-        f"rm -f {shlex.quote(_K8S_PYTHON312_LINK)}",
-        f"ln -s {shlex.quote(_K8S_BASE_PYTHON)} {shlex.quote(_K8S_PYTHON312_LINK)}",
+        'python_bootstrap_dir="$(mktemp -d /tmp/k8s-python-bootstrap.XXXXXX)"',
+        (
+            "printf '%s\\n' "
+            f"{shlex.quote('import site')} "
+            f"{shlex.quote(f'site.addsitedir({json.dumps(_K8S_SHARED_SITE_PACKAGES)})')} "
+            '> "$python_bootstrap_dir/sitecustomize.py"'
+        ),
+        'export PYTHONPATH="$python_bootstrap_dir${PYTHONPATH:+:$PYTHONPATH}"',
         f"export VIRTUAL_ENV={shlex.quote(_K8S_VIRTUAL_ENV)}",
-        f"export PATH={shlex.quote(_K8S_VIRTUAL_ENV + '/bin')}:$PATH",
+        f"export PATH={shlex.quote(str(PurePosixPath(_K8S_BASE_PYTHON).parent))}:$PATH",
+        "export PYTHONNOUSERSITE=1",
         "unset PYTHONHOME || true",
         f"cd {shlex.quote(str(project_mount))}",
         'raw_index="${JOB_COMPLETION_INDEX:?JOB_COMPLETION_INDEX is required}"',
@@ -433,9 +542,12 @@ def prepare_cpu_job(
     manifest = {
         "requestId": request_id,
         "shardCount": shard_count,
-        "pathMapping": "identity-venv-python312-v3",
-        "pythonExecutable": _K8S_PYTHON_EXECUTABLE,
-        "python312Target": _K8S_BASE_PYTHON,
+        "pathMapping": "identity-venv-sitecustomize-v6",
+        "pythonExecutable": _K8S_BASE_PYTHON,
+        "sharedSitePackages": _K8S_SHARED_SITE_PACKAGES,
+        "pythonPackageStrategy": _K8S_PYTHON_PACKAGE_STRATEGY,
+        "requiredPythonPackages": required_python_packages,
+        "pythonPackageInventory": python_package_inventory,
         "mountPath": str(mount_base),
         "projectWorkspacePath": str(project_mount),
         "command": ["/bin/sh", launcher_job_path],
@@ -484,6 +596,8 @@ def prepare_cpu_job(
         "optionalEnvKeys": optional_env_keys,
         "independentShardsConfirmed": independent_shards_confirmed,
         "environmentRequirements": environment_requirements,
+        "requiredPythonPackages": required_python_packages,
+        "pythonPackageInventory": python_package_inventory,
         "workerIndex": manifest["workerIndex"],
     }
 
@@ -500,13 +614,31 @@ def load_verified_preflight(
     if manifest.get("requestId") != request_id or manifest.get("shardCount") != shard_count:
         raise ValueError("prepared request does not match request_id and shard_count")
     if (
-        manifest.get("pathMapping") != "identity-venv-python312-v3"
-        or manifest.get("pythonExecutable") != _K8S_PYTHON_EXECUTABLE
-        or manifest.get("python312Target") != _K8S_BASE_PYTHON
+        manifest.get("pathMapping") != "identity-venv-sitecustomize-v6"
+        or manifest.get("pythonExecutable") != _K8S_BASE_PYTHON
+        or manifest.get("sharedSitePackages") != _K8S_SHARED_SITE_PACKAGES
+        or manifest.get("pythonPackageStrategy") != _K8S_PYTHON_PACKAGE_STRATEGY
         or manifest.get("projectWorkspacePath") != str(root)
     ):
         raise ValueError(
             "prepared CPU job uses an obsolete workspace or Python runtime; run "
+            "prepare_cpu_job again"
+        )
+    required_python_packages = manifest.get("requiredPythonPackages")
+    python_package_inventory = manifest.get("pythonPackageInventory")
+    if not isinstance(required_python_packages, list) or not isinstance(
+        python_package_inventory, list
+    ):
+        raise ValueError(
+            "prepared CPU job lacks the shared .venv package inventory; run "
+            "prepare_cpu_job again"
+        )
+    current_python_package_inventory = _inventory_required_python_packages(
+        required_python_packages
+    )
+    if current_python_package_inventory != python_package_inventory:
+        raise ValueError(
+            "required packages in the shared .venv changed after preflight; run "
             "prepare_cpu_job again"
         )
     launcher = Path(str(manifest.get("launcherLocalPath", "")))
