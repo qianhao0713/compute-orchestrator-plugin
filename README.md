@@ -31,7 +31,7 @@ Jobs without moving the Claude Code runtime.
 8. Reassess after confirmed resource-related failures such as OOM.
 
 For distributed CPU work, the lifecycle is separate: validate scripts and
-model-declared stable-workspace input/output paths, adapt K8s
+model-declared input/output paths, adapt K8s
 `JOB_COMPLETION_INDEX` to the index interface
 used by the user's script, discover required environment variables, normalize
 directory variables to K8s project paths, estimate advisory capacity, obtain
@@ -139,15 +139,16 @@ each Portal HTTP request, the plugin appends the method, URL, sanitized headers,
 and JSON body to `PLUGIN_LOG_DIR/portal_requests.jsonl`. Authorization is
 redacted. A logging failure prevents the Portal request from being sent.
 
-K8s CPU submissions use the normal (non-VIP) storage route. They omit
-`executionProfile`; `image` is also omitted unless the user explicitly specifies
-a pullable custom image.
-Every declared input must exist beneath
-`AI_SCIENTIST_STABLE_WORKSPACE_ROOT`, and every output must have a writable
-parent there. Portal mounts the stable workspace into K8s at the same absolute
-path: `/home/scientist/project123/data/input.csv` remains
-`/home/scientist/project123/data/input.csv`. VIP jobs are rejected because the
-interactive container cannot verify their separate storage volume.
+K8s CPU submissions omit `isVip` and `executionProfile`; Portal determines VIP
+status. For a Portal-classified VIP job, K8s additionally receives `/mnt/nas`,
+which is not visible in the interactive container. Explicit `/mnt/nas/...`
+business inputs and outputs are therefore preserved but marked locally
+unverified. Scripts and inspected configuration must remain under
+`AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. The model, not `prepare_cpu_job`, is
+responsible for identifying inputs/outputs and checking local input visibility
+and output destinations. Code enforces only path boundaries. Portal mounts the
+workspace into K8s at the same absolute path. `image` is omitted unless the user
+explicitly specifies a pullable custom image.
 
 `ENABLE_HANDOFF` accepts `true/false`, `1/0`, `yes/no`, or `on/off`. It
 defaults to `false`. When disabled, callers do not need to prepare continuation

@@ -152,8 +152,8 @@ def _cpu_job(**overrides):
 def test_cpu_job_request_accepts_valid_normal_job():
     request = _cpu_job()
     assert request.parallelism == 2
-    assert request.is_vip is False
     payload = request.model_dump(by_alias=True, exclude_none=True)
+    assert "isVip" not in payload
     assert "executionProfile" not in payload
     assert "image" not in payload
 
@@ -170,6 +170,6 @@ def test_cpu_job_request_rejects_reserved_or_secret_env():
         _cpu_job(env={"API_TOKEN": "secret"})
 
 
-def test_cpu_job_request_rejects_vip_until_visibility_can_be_verified():
-    with pytest.raises(ValidationError, match="VIP CPU jobs"):
-        _cpu_job(isVip=True)
+def test_cpu_job_request_rejects_obsolete_is_vip_field():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        _cpu_job(isVip=False)

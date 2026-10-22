@@ -143,8 +143,14 @@ retired Conda environment.
   after affirmative consent. The model must determine and declare the complete
   script/configuration, input/output, required/optional environment, independent-
   shard, and worker-index contracts; do not rely on source-string or suffix
-  heuristics. Preparation validates those declarations and path mappings under
-  `AI_SCIENTIST_STABLE_WORKSPACE_ROOT`. Map `JOB_COMPLETION_INDEX` explicitly to
+  heuristics. Before preparation, use model reasoning and safe read-only checks
+  to confirm every local input is visible and every output destination is
+  appropriate; `prepare_cpu_job` deliberately does not infer, require, or
+  reclassify inputs/outputs. Preparation enforces path boundaries and permits
+  explicitly declared `/mnt/nas/...` business inputs/outputs as K8s-only,
+  locally unverified Portal storage. Never place scripts or inspected
+  configuration there. Do not send `isVip`; Portal determines it and mounts
+  `/mnt/nas` for eligible jobs. Map `JOB_COMPLETION_INDEX` explicitly to
   user variables such as `RANK`. Before preparation, install any additional
   Python packages locally with
   `/home/scientist/.venv/bin/python -m pip install --ignore-installed ...` and

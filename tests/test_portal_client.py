@@ -289,6 +289,7 @@ async def test_cpu_job_endpoints_use_project_scope_and_log_requests(tmp_path):
     sent = json.loads(submit_route.calls.last.request.content)
     assert sent["sessionId"] == "session-1"
     assert "projectId" not in sent
+    assert "isVip" not in sent
     assert "executionProfile" not in sent
     assert "image" not in sent
 

@@ -18,9 +18,9 @@ workers on one physical node, so do not promise a node count.
   idempotent, and fail on timeout. For a long singleton stage, submit it as a
   separate job before or after the parallel job instead of idling workers.
 - Do not set `executionProfile`. Omit `image` unless the user explicitly names
-  a custom image; when explicitly supplied, it must be pullable by K8s. The
-  plugin rejects VIP jobs because current stable-workspace visibility cannot
-  prove access to the VIP volume.
+  a custom image; when explicitly supplied, it must be pullable by K8s. Do not
+  send an `isVip` field: Portal determines VIP status and, for eligible jobs,
+  mounts an additional `/mnt/nas` volume visible only inside K8s.
 
 ## Required sequence
 
@@ -35,11 +35,22 @@ workers on one physical node, so do not promise a node count.
    exactly one of `required_env_keys` or `optional_env_keys`. Supply required
    non-platform values in `env`. The plugin deliberately does not infer these
    semantics from source strings or filename suffixes; it validates the model's
-   declarations, stable paths, and environment completeness. Never edit the
-   user's original script merely to submit it.
+   path boundaries and environment completeness, but does not infer, reclassify,
+   or require the existence/writability of declared inputs and outputs. The
+   model must use safe read-only checks to confirm every locally visible input
+   and assess every output destination before preparation. Never edit the user's
+   original script merely to submit it.
    Portal mounts the stable workspace into K8s at the same absolute path. For
    example, `/home/scientist/project123/data/input.csv` remains
    `/home/scientist/project123/data/input.csv` inside the worker.
+   A business input or output may instead be explicitly declared under
+   `/mnt/nas/...`. Preserve that absolute path and treat it as K8s-only Portal
+   storage: validate its lexical boundary but do not require local existence,
+   readability, or writability. The returned `portalStoragePaths` identifies
+   these locally unverified paths. Do not put entry scripts, imported wrappers,
+   or configuration requiring inspection there because the current container
+   cannot read them. Portal's VIP decision is authoritative; never infer it or
+   add `isVip` to the submission.
    For local preparation, use `/home/scientist/.venv/bin/python`. If required
    distributions are absent from the shared `.venv` inventory, install the
    smallest compatible dependency set locally first with
@@ -69,9 +80,11 @@ workers on one physical node, so do not promise a node count.
    path-valued environment variable in `env_path_keys`; do not infer path meaning
    from its name. Required variables must be satisfied by the request, platform,
    or worker-index launcher; optional variables may remain unset. The preflight
-   converts declared directory/file environment values from local
-   stable-workspace paths to the identical K8s paths and validates input
-   readability or output-parent writability. `submit_cpu_job` uses only
+   preserves declared workspace and `/mnt/nas` path values and enforces their
+   path boundaries. It does not decide whether a value is semantically an input
+   or output and does not check input readability or output writability;
+   `/mnt/nas` paths can only be checked lexically before K8s starts.
+   `submit_cpu_job` uses only
    this frozen environment; never add or change variables at submission time.
 5. Finish dependency installation before submission. Confirm the returned
    `pythonPackageInventory`; submission rechecks the same names and versions and
@@ -105,7 +118,7 @@ workers on one physical node, so do not promise a node count.
 
 Chinese question:
 
-`将向 K8s 提交 CPU 分布式任务：共 N 个分片，最大并发 M，每个 worker 使用 X 核 CPU 和 Y GiB 内存。该操作不会切换或中断当前 Claude Code 会话。是否确认提交？`
+`将向 K8s 提交 CPU 分布式任务：共 N 个分片，最大并发 M，每个 worker 使用 X 核 CPU 和 Y GiB 内存。该操作不会切换或中断当前会话。是否确认提交？`
 
 Options, in order:
 
@@ -114,7 +127,7 @@ Options, in order:
 
 English question:
 
-`A distributed CPU job will be submitted to K8s with N shards, maximum parallelism M, and X CPU cores and Y GiB memory per worker. This will not switch or interrupt the current Claude Code session. Submit the job?`
+`A distributed CPU job will be submitted to K8s with N shards, maximum parallelism M, and X CPU cores and Y GiB memory per worker. This will not switch or interrupt the current session. Submit the job?`
 
 Options, in order:
 

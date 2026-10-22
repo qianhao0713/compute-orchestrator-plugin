@@ -108,7 +108,6 @@ class CpuJobSubmitRequest(BaseModel):
 
     request_id: str = Field(alias="requestId", min_length=1, max_length=64)
     session_id: str = Field(alias="sessionId", min_length=1, max_length=128)
-    is_vip: bool = Field(default=False, alias="isVip")
     image: str | None = Field(default=None, max_length=512)
     command: list[str] = Field(min_length=1, max_length=64)
     args: list[str] = Field(default_factory=list, max_length=256)
@@ -130,11 +129,6 @@ class CpuJobSubmitRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_cpu_job(self) -> "CpuJobSubmitRequest":
-        if self.is_vip:
-            raise ValueError(
-                "VIP CPU jobs are not accepted by this plugin because stable-path "
-                "visibility cannot be verified"
-            )
         if self.image is not None and not self.image.strip():
             raise ValueError("image must be omitted or non-blank")
         if self.parallelism > self.shard_count:

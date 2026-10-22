@@ -87,6 +87,48 @@ def test_k8s_path_missing_project_directory_is_rejected(tmp_path):
         _prepare(root, input_paths=[str(root.parent / "data.csv")])
 
 
+def test_preflight_does_not_enforce_declared_input_existence(tmp_path):
+    root = _workspace(tmp_path)
+    missing_input = root / "model-declared-input.csv"
+
+    result = _prepare(root, input_paths=[str(missing_input)])
+
+    assert result["inputPaths"] == [str(missing_input)]
+
+
+def test_preflight_accepts_k8s_only_portal_storage_paths(tmp_path):
+    root = _workspace(tmp_path)
+    result = _prepare(
+        root,
+        input_paths=["/mnt/nas/datasets/input.csv"],
+        output_paths=["/mnt/nas/results/run-1"],
+        env={
+            "INPUT_FILE": "/mnt/nas/datasets/input.csv",
+            "OUTPUT_DIR": "/mnt/nas/results/run-1",
+        },
+        env_path_keys=["INPUT_FILE", "OUTPUT_DIR"],
+        required_env_keys=["SHARD_ID", "INPUT_FILE", "OUTPUT_DIR"],
+    )
+
+    assert result["inputPaths"] == ["/mnt/nas/datasets/input.csv"]
+    assert result["outputPaths"] == ["/mnt/nas/results/run-1"]
+    assert result["env"]["INPUT_FILE"] == "/mnt/nas/datasets/input.csv"
+    assert result["portalStoragePaths"] == {
+        "inputs": ["/mnt/nas/datasets/input.csv"],
+        "outputs": ["/mnt/nas/results/run-1"],
+        "visibility": "k8s-only",
+        "locallyVerified": False,
+    }
+
+
+def test_preflight_rejects_portal_storage_root_and_escape(tmp_path):
+    root = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="below /mnt/nas"):
+        _prepare(root, input_paths=["/mnt/nas"])
+    with pytest.raises(ValueError, match="must not contain"):
+        _prepare(root, request_id="request-2", input_paths=["/mnt/nas/../etc"])
+
+
 def test_preflight_maps_index_to_user_argument(tmp_path):
     root = _workspace(tmp_path)
     (root / "worker.py").write_text(
@@ -327,15 +369,16 @@ def test_preflight_rejects_missing_required_environment_variable(tmp_path):
         _prepare(root, required_env_keys=["SHARD_ID", "RUN_MODE"])
 
 
-def test_preflight_rejects_undeclared_output_environment_path(tmp_path):
+def test_preflight_does_not_classify_environment_path_as_input_or_output(tmp_path):
     root = _workspace(tmp_path)
-    with pytest.raises(ValueError, match="input_paths or output_paths"):
-        _prepare(
-            root,
-            env={"OUTPUT_DIR": str(root / "other-results")},
-            env_path_keys=["OUTPUT_DIR"],
-            required_env_keys=["SHARD_ID", "OUTPUT_DIR"],
-        )
+    result = _prepare(
+        root,
+        env={"OUTPUT_DIR": str(root / "other-results")},
+        env_path_keys=["OUTPUT_DIR"],
+        required_env_keys=["SHARD_ID", "OUTPUT_DIR"],
+    )
+
+    assert result["env"]["OUTPUT_DIR"] == str(root / "other-results")
 
 
 def test_declared_custom_directory_variable_is_mapped_as_output(tmp_path):

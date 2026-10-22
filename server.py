@@ -218,47 +218,36 @@ def _validate_cpu_job_env_paths(
     env: dict[str, str],
     *,
     current_settings: Settings,
-    output_job_paths: list[str],
     env_path_keys: list[str],
 ) -> None:
     root = current_settings.stable_workspace_root.resolve(strict=True)
     mount = PurePosixPath(str(root))
-    output_roots = [PurePosixPath(value) for value in output_job_paths]
+    portal_mount = PurePosixPath("/mnt/nas")
     for key in env_path_keys:
         value = env.get(key)
         if not isinstance(value, str):
             raise ValueError(f"prepared path environment variable is missing: {key}")
         job_path = PurePosixPath(value)
-        if not job_path.is_absolute() or not (
-            job_path == mount or mount in job_path.parents
+        is_workspace_path = job_path == mount or mount in job_path.parents
+        is_portal_storage_path = portal_mount in job_path.parents
+        if (
+            not job_path.is_absolute()
+            or ".." in job_path.parts
+            or not (is_workspace_path or is_portal_storage_path)
         ):
             raise ValueError(
                 f"CPU Job path environment variable {key} must be under "
-                f"{mount}"
+                f"{mount} or /mnt/nas"
             )
-        local = root.joinpath(*job_path.relative_to(mount).parts)
-        is_output = any(
-            job_path == output or output in job_path.parents
-            for output in output_roots
-        )
-        if is_output:
-            parent = local
-            while not parent.exists() and parent != parent.parent:
-                parent = parent.parent
-            resolved = parent.resolve(strict=True)
-            if root not in (resolved, *resolved.parents) or not os.access(parent, os.W_OK):
-                raise ValueError(f"CPU Job output path is not writable in stable storage: {key}")
-        else:
-            try:
-                resolved = local.resolve(strict=True)
-            except OSError as exc:
-                raise ValueError(
-                    f"CPU Job input path is not visible in stable storage: {key}"
-                ) from exc
-            if root not in (resolved, *resolved.parents) or not os.access(resolved, os.R_OK):
-                raise ValueError(
-                    f"CPU Job input path is not readable in stable storage: {key}"
-                )
+        if is_portal_storage_path:
+            # Portal decides whether the K8s-only storage is mounted. It cannot
+            # be checked for existence or permissions from this container.
+            continue
+        resolved = Path(value).resolve(strict=False)
+        if root not in (resolved, *resolved.parents):
+            raise ValueError(
+                f"CPU Job path environment variable {key} escapes stable storage"
+            )
 
 
 def _persist_cpu_job_submission(
@@ -322,13 +311,16 @@ def prepare_cpu_job(
     worker_index_argument: str | None = None,
     worker_index_base: int = 0,
 ) -> dict[str, Any]:
-    """Validate stable paths and create a derived K8s worker-index launcher.
+    """Validate job paths and create a derived K8s worker-index launcher.
 
     The model must confirm independent shards, explicitly declare whether user
     code consumes JOB_COMPLETION_INDEX natively or map it to the user's actual
     environment variable/argument, classify all consumed environment variables
     as required or optional, and list all scripts/configuration and business
-    input/output paths. The plugin validates those declarations and creates a
+    input/output paths. The model owns their semantic classification and access
+    checks; the plugin enforces only stable-workspace path boundaries.
+    Explicit /mnt/nas business paths are recorded as K8s-only and locally
+    unverified because Portal determines VIP mounting. The plugin creates a
     launcher without modifying user source. The model must declare required
     Python distribution names; preparation verifies their metadata directly in
     the shared .venv rather than accepting an import resolved from system paths.
@@ -438,11 +430,6 @@ async def submit_cpu_job(
     effective_env = manifest.get("env")
     if not isinstance(effective_env, dict):
         raise ValueError("prepared CPU Job environment is missing or invalid")
-    output_job_paths = manifest.get("outputJobPaths")
-    if not isinstance(output_job_paths, list) or not all(
-        isinstance(value, str) for value in output_job_paths
-    ):
-        raise ValueError("prepared CPU Job output paths are missing or invalid")
     env_path_keys = manifest.get("envPathKeys")
     if not isinstance(env_path_keys, list) or not all(
         isinstance(value, str) for value in env_path_keys
@@ -451,13 +438,11 @@ async def submit_cpu_job(
     _validate_cpu_job_env_paths(
         effective_env,
         current_settings=current_settings,
-        output_job_paths=output_job_paths,
         env_path_keys=env_path_keys,
     )
     request = CpuJobSubmitRequest(
         requestId=request_id,
         sessionId=session_id,
-        isVip=False,
         image=image,
         command=manifest["command"],
         args=manifest["args"],

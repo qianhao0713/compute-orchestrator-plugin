@@ -32,6 +32,7 @@ _K8S_SHARED_SITE_PACKAGES = (
     "/home/scientist/.venv/lib/python3.12/site-packages"
 )
 _K8S_PYTHON_PACKAGE_STRATEGY = "sitecustomize-addsitedir-v1"
+_K8S_PORTAL_STORAGE_ROOT = PurePosixPath("/mnt/nas")
 _IMPLICIT_ENV = {
     "HOME", "HOSTNAME", "LANG", "LC_ALL", "LOGNAME", "PATH", "PWD",
     "PYTHONPATH", "SHLVL", "TMPDIR", "USER",
@@ -51,6 +52,22 @@ def _nearest_existing_parent(path: Path) -> Path:
     while not candidate.exists() and candidate != candidate.parent:
         candidate = candidate.parent
     return candidate
+
+
+def _portal_storage_path(raw: str) -> str | None:
+    """Return a normalized K8s-only Portal storage path, if applicable."""
+    if not isinstance(raw, str) or "\x00" in raw:
+        raise ValueError("paths must be strings without NUL")
+    if not raw.strip():
+        return None
+    path = PurePosixPath(raw.strip())
+    if path == _K8S_PORTAL_STORAGE_ROOT:
+        raise ValueError("Portal storage paths must be below /mnt/nas, not its root")
+    if _K8S_PORTAL_STORAGE_ROOT not in path.parents:
+        return None
+    if ".." in path.parts:
+        raise ValueError("Portal storage paths must not contain '..'")
+    return str(path)
 
 
 def _resolve_local_path(
@@ -94,11 +111,6 @@ def _resolve_local_path(
         raise ValueError(f"required script is not a file: {raw}")
     if must_exist and not os.access(resolved, os.R_OK):
         raise ValueError(f"required stable path is not readable: {raw}")
-    if not must_exist:
-        writable_parent = _nearest_existing_parent(resolved)
-        if not os.access(writable_parent, os.W_OK):
-            raise ValueError(f"output parent is not writable: {raw}")
-
     relative = resolved.relative_to(stable_root_resolved)
     job_path = str(mount_path.joinpath(*relative.parts))
     return resolved, job_path
@@ -110,8 +122,6 @@ def _prepare_environment(
     stable_root: Path,
     project_mount: PurePosixPath,
     worker_index_env: str | None,
-    input_roots: list[Path],
-    output_roots: list[Path],
     env_path_keys: list[str],
     required_env_keys: list[str],
     optional_env_keys: list[str],
@@ -173,10 +183,11 @@ def _prepare_environment(
                 resolved_value = raw_path
             looks_like_workspace_path = _inside(resolved_value, stable_root)
         posix_value = PurePosixPath(value)
+        portal_storage_value = _portal_storage_path(value)
         looks_like_workspace_path = looks_like_workspace_path or (
             posix_value.is_absolute()
             and (posix_value == project_mount or project_mount in posix_value.parents)
-        )
+        ) or portal_storage_value is not None
         if looks_like_workspace_path and not path_named:
             raise ValueError(
                 f"environment variable {key} contains a workspace path; "
@@ -184,33 +195,19 @@ def _prepare_environment(
             )
         effective_value = value
         if path_named:
-            local_value, effective_value = _resolve_local_path(
+            if portal_storage_value is not None:
+                effective_value = portal_storage_value
+                normalized[key] = effective_value
+                env_bytes += len(key.encode("utf-8")) + len(
+                    effective_value.encode("utf-8")
+                )
+                continue
+            _, effective_value = _resolve_local_path(
                 value,
                 stable_root=stable_root,
                 mount_path=project_mount,
                 must_exist=False,
             )
-            is_output = any(
-                local_value == output or _inside(local_value, output)
-                for output in output_roots
-            )
-            is_input = any(
-                local_value == input_path
-                or _inside(local_value, input_path)
-                or _inside(input_path, local_value)
-                for input_path in input_roots
-            )
-            if not is_output and not is_input:
-                raise ValueError(
-                    f"environment path must be declared in input_paths or output_paths: {key}"
-                )
-            if is_input and not is_output:
-                _, effective_value = _resolve_local_path(
-                    value,
-                    stable_root=stable_root,
-                    mount_path=project_mount,
-                    must_exist=True,
-                )
         normalized[key] = effective_value
         env_bytes += len(key.encode("utf-8")) + len(effective_value.encode("utf-8"))
     if env_bytes > 8192:
@@ -462,32 +459,39 @@ def prepare_cpu_job(
 
     local_inputs: list[str] = []
     job_inputs: list[str] = []
+    portal_storage_inputs: list[str] = []
     for raw in input_paths:
+        portal_path = _portal_storage_path(raw)
+        if portal_path is not None:
+            portal_storage_inputs.append(portal_path)
+            job_inputs.append(portal_path)
+            continue
         local, job = _resolve_local_path(
-            raw, stable_root=root, mount_path=project_mount, must_exist=True
+            raw, stable_root=root, mount_path=project_mount, must_exist=False
         )
         local_inputs.append(str(local))
         job_inputs.append(job)
 
     local_outputs: list[str] = []
     job_outputs: list[str] = []
+    portal_storage_outputs: list[str] = []
     for raw in output_paths:
+        portal_path = _portal_storage_path(raw)
+        if portal_path is not None:
+            portal_storage_outputs.append(portal_path)
+            job_outputs.append(portal_path)
+            continue
         local, job = _resolve_local_path(
             raw, stable_root=root, mount_path=project_mount, must_exist=False
         )
         local_outputs.append(str(local))
         job_outputs.append(job)
 
-    input_roots = [Path(value) for value in local_inputs]
-    output_roots = [Path(value) for value in local_outputs]
-
     prepared_env, environment_requirements = _prepare_environment(
         env,
         stable_root=root,
         project_mount=project_mount,
         worker_index_env=worker_index_env,
-        input_roots=input_roots,
-        output_roots=output_roots,
         env_path_keys=env_path_keys,
         required_env_keys=required_env_keys,
         optional_env_keys=optional_env_keys,
@@ -542,7 +546,7 @@ def prepare_cpu_job(
     manifest = {
         "requestId": request_id,
         "shardCount": shard_count,
-        "pathMapping": "identity-venv-sitecustomize-v6",
+        "pathMapping": "model-declared-io-portal-storage-v8",
         "pythonExecutable": _K8S_BASE_PYTHON,
         "sharedSitePackages": _K8S_SHARED_SITE_PACKAGES,
         "pythonPackageStrategy": _K8S_PYTHON_PACKAGE_STRATEGY,
@@ -565,8 +569,10 @@ def prepare_cpu_job(
         "scriptJobPaths": job_scripts,
         "inputLocalPaths": local_inputs,
         "inputJobPaths": job_inputs,
+        "portalStorageInputPaths": portal_storage_inputs,
         "outputLocalPaths": local_outputs,
         "outputJobPaths": job_outputs,
+        "portalStorageOutputPaths": portal_storage_outputs,
         "workerIndex": {
             "source": "JOB_COMPLETION_INDEX",
             "usesNativeCompletionIndex": uses_native_completion_index,
@@ -590,6 +596,12 @@ def prepare_cpu_job(
         "scriptPaths": job_scripts,
         "inputPaths": job_inputs,
         "outputPaths": job_outputs,
+        "portalStoragePaths": {
+            "inputs": portal_storage_inputs,
+            "outputs": portal_storage_outputs,
+            "visibility": "k8s-only",
+            "locallyVerified": False,
+        },
         "env": prepared_env,
         "envPathKeys": env_path_keys,
         "requiredEnvKeys": required_env_keys,
@@ -614,7 +626,7 @@ def load_verified_preflight(
     if manifest.get("requestId") != request_id or manifest.get("shardCount") != shard_count:
         raise ValueError("prepared request does not match request_id and shard_count")
     if (
-        manifest.get("pathMapping") != "identity-venv-sitecustomize-v6"
+        manifest.get("pathMapping") != "model-declared-io-portal-storage-v8"
         or manifest.get("pythonExecutable") != _K8S_BASE_PYTHON
         or manifest.get("sharedSitePackages") != _K8S_SHARED_SITE_PACKAGES
         or manifest.get("pythonPackageStrategy") != _K8S_PYTHON_PACKAGE_STRATEGY
@@ -641,6 +653,27 @@ def load_verified_preflight(
             "required packages in the shared .venv changed after preflight; run "
             "prepare_cpu_job again"
         )
+    for field, job_field in (
+        ("portalStorageInputPaths", "inputJobPaths"),
+        ("portalStorageOutputPaths", "outputJobPaths"),
+    ):
+        portal_paths = manifest.get(field)
+        job_paths = manifest.get(job_field)
+        if not isinstance(portal_paths, list) or not isinstance(job_paths, list):
+            raise ValueError(
+                "prepared CPU job lacks its Portal storage inventory; run "
+                "prepare_cpu_job again"
+            )
+        for raw in portal_paths:
+            if _portal_storage_path(raw) != raw:
+                raise ValueError("prepared CPU job has an invalid Portal storage path")
+        declared_portal_paths = [
+            raw
+            for raw in job_paths
+            if isinstance(raw, str) and _portal_storage_path(raw) is not None
+        ]
+        if declared_portal_paths != portal_paths:
+            raise ValueError("prepared CPU job Portal storage inventory changed")
     launcher = Path(str(manifest.get("launcherLocalPath", "")))
     try:
         launcher_resolved = launcher.resolve(strict=True)
@@ -651,14 +684,8 @@ def load_verified_preflight(
     digest = hashlib.sha256(launcher_resolved.read_bytes()).hexdigest()
     if digest != manifest.get("launcherSha256"):
         raise ValueError("prepared CPU job launcher changed after preflight")
-    for raw in manifest.get("scriptLocalPaths", []) + manifest.get("inputLocalPaths", []):
+    for raw in manifest.get("scriptLocalPaths", []):
         resolved = Path(raw).resolve(strict=True)
         if not _inside(resolved, root) or not os.access(resolved, os.R_OK):
-            raise ValueError(f"prepared input is no longer readable in stable storage: {raw}")
-    for raw in manifest.get("outputLocalPaths", []):
-        output = Path(raw)
-        parent = _nearest_existing_parent(output)
-        resolved_parent = parent.resolve(strict=True)
-        if not _inside(resolved_parent, root) or not os.access(resolved_parent, os.W_OK):
-            raise ValueError(f"prepared output parent is no longer writable: {raw}")
+            raise ValueError(f"prepared script is no longer readable in stable storage: {raw}")
     return manifest

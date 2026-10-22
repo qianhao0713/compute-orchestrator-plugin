@@ -168,3 +168,44 @@ async def test_submit_rejects_env_path_without_project_directory(monkeypatch, tm
             independent_shards_confirmed=True,
             worker_index_env="MY_SHARD",
         )
+
+
+@pytest.mark.asyncio
+async def test_submit_allows_portal_managed_k8s_only_storage(monkeypatch, tmp_path):
+    root = _workspace(tmp_path)
+    current_settings = _settings(root)
+    client = _CpuJobClient()
+    monkeypatch.setattr(server, "settings", lambda: current_settings)
+    monkeypatch.setattr(server, "portal_client", lambda: client)
+    server.prepare_cpu_job(
+        request_id="portal-storage-request",
+        command=["python", str(root / "worker.py")],
+        shard_count=2,
+        script_paths=[str(root / "worker.py")],
+        input_paths=["/mnt/nas/datasets/input.csv"],
+        output_paths=["/mnt/nas/results/job-1"],
+        env={
+            "INPUT_FILE": "/mnt/nas/datasets/input.csv",
+            "OUTPUT_DIR": "/mnt/nas/results/job-1",
+        },
+        env_path_keys=["INPUT_FILE", "OUTPUT_DIR"],
+        required_env_keys=["MY_SHARD", "INPUT_FILE", "OUTPUT_DIR"],
+        independent_shards_confirmed=True,
+        worker_index_env="MY_SHARD",
+    )
+
+    result = await server.submit_cpu_job(
+        request_id="portal-storage-request",
+        shard_count=2,
+        parallelism=2,
+        cpu_per_worker=1,
+        memory_gib_per_worker=2,
+        session_id="trusted-session",
+    )
+
+    assert result["jobId"] == "job-1"
+    assert client.submission.env == {
+        "INPUT_FILE": "/mnt/nas/datasets/input.csv",
+        "OUTPUT_DIR": "/mnt/nas/results/job-1",
+    }
+    assert "isVip" not in client.submission.model_dump(by_alias=True)
