@@ -409,7 +409,7 @@ async def submit_cpu_job(
     image: str | None = None,
     ephemeral_storage_gib: int = 2,
     job_backoff_limit: int = 6,
-    active_deadline_seconds: int = 21600,
+    active_deadline_seconds: int = -1,
     description: str | None = None,
     session_id: str = "",
 ) -> dict[str, Any]:

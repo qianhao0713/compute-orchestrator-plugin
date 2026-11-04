@@ -26,8 +26,10 @@ workers on one physical node, so do not promise a node count.
 
 1. Inspect the user's scripts, configuration, command, data, outputs, and
    environment requirements. Estimate shard count, maximum parallelism, CPU,
-   memory, ephemeral storage, and deadline per worker. Use the smallest
-   sufficient values; `parallelism` must not exceed `shardCount`.
+   memory, ephemeral storage, and any user-requested active deadline per worker.
+   Use the smallest sufficient resources; `parallelism` must not exceed
+   `shardCount`. Set `activeDeadlineSeconds=-1` for no deadline, or a positive
+   number of seconds chosen by the user.
 2. Before calling `prepare_cpu_job`, use model reasoning to inspect every entry
    script, imported wrapper, configuration, and command. Declare all inspected
    files in `script_paths`, the complete business input/output set in
@@ -156,7 +158,8 @@ Options: `Cancel job` — `Stop unfinished shards.`; `Keep job` — `Do not canc
 Nonterminal states include `ACCEPTED`, `SUBMITTING`, `QUEUED`, `RUNNING`,
 `RETRYING`, `FAILING`, and `CANCELLING`. Terminal states are `SUCCEEDED`,
 `FAILED`, `CANCELLED`, and `UNKNOWN`; inspect attempts/logs before interpreting
-`UNKNOWN`. Respect the configured backoff limit and active deadline. Shards
+`UNKNOWN`. Respect the configured backoff limit and any positive active
+deadline; `-1` means unlimited. Shards
 must write outputs atomically or use shard-specific output names so retries are
 idempotent. Never infer success solely from submit HTTP status or a running
 worker count; Portal business success still requires code `00000`.

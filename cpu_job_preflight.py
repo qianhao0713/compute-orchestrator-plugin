@@ -33,6 +33,7 @@ _K8S_SHARED_SITE_PACKAGES = (
 )
 _K8S_PYTHON_PACKAGE_STRATEGY = "sitecustomize-addsitedir-v1"
 _K8S_PORTAL_STORAGE_ROOT = PurePosixPath("/mnt/nas")
+_K8S_DEFAULT_ENV = {"PYTHONUNBUFFERED": "1"}
 _IMPLICIT_ENV = {
     "HOME", "HOSTNAME", "LANG", "LC_ALL", "LOGNAME", "PATH", "PWD",
     "PYTHONPATH", "SHLVL", "TMPDIR", "USER",
@@ -210,15 +211,19 @@ def _prepare_environment(
             )
         normalized[key] = effective_value
         env_bytes += len(key.encode("utf-8")) + len(effective_value.encode("utf-8"))
-    if env_bytes > 8192:
-        raise ValueError("CPU Job environment exceeds 8192 UTF-8 bytes")
-
     undeclared_values = sorted(set(normalized) - required_names - optional_names)
     if undeclared_values:
         raise ValueError(
             "supplied environment variables must be classified in required_env_keys "
             "or optional_env_keys: " + ", ".join(undeclared_values)
         )
+    for key, value in _K8S_DEFAULT_ENV.items():
+        if key not in normalized:
+            normalized[key] = value
+            env_bytes += len(key.encode("utf-8")) + len(value.encode("utf-8"))
+    if env_bytes > 8192:
+        raise ValueError("CPU Job environment exceeds 8192 UTF-8 bytes")
+
     provided_by_platform = CPU_JOB_RESERVED_ENV | _IMPLICIT_ENV
     if worker_index_env:
         provided_by_platform.add(worker_index_env)

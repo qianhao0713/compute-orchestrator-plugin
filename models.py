@@ -122,13 +122,15 @@ class CpuJobSubmitRequest(BaseModel):
         default=6, alias="jobBackoffLimit", ge=0, le=20
     )
     active_deadline_seconds: int = Field(
-        default=21600, alias="activeDeadlineSeconds", ge=1, le=172800
+        default=-1, alias="activeDeadlineSeconds", ge=-1
     )
     description: str | None = Field(default=None, max_length=1024)
     env: dict[str, str] = Field(default_factory=dict, max_length=32)
 
     @model_validator(mode="after")
     def validate_cpu_job(self) -> "CpuJobSubmitRequest":
+        if self.active_deadline_seconds == 0:
+            raise ValueError("activeDeadlineSeconds must be -1 or a positive integer")
         if self.image is not None and not self.image.strip():
             raise ValueError("image must be omitted or non-blank")
         if self.parallelism > self.shard_count:
